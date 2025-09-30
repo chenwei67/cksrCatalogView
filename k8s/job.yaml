@@ -1,0 +1,76 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cksr-job
+  namespace: default
+  labels:
+    app: cksr
+spec:
+  # Job完成后保留的Pod数量，用于查看日志
+  completions: 1
+  parallelism: 1
+  backoffLimit: 3
+  # Job完成后自动清理时间（秒）
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: cksr
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: cksr
+        image: cksr:latest
+        imagePullPolicy: IfNotPresent
+        command: ["./cksr"]
+        args: ["/etc/cksr/config.json"]
+        
+        # 环境变量
+        env:
+        - name: TZ
+          value: "Asia/Shanghai"
+        
+        # 资源限制
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        
+        # 挂载配置文件
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/cksr
+          readOnly: true
+        - name: temp-volume
+          mountPath: /tmp/cksr
+        
+        # 健康检查（可选）
+        # livenessProbe:
+        #   exec:
+        #     command:
+        #     - /bin/sh
+        #     - -c
+        #     - "ps aux | grep cksr"
+        #   initialDelaySeconds: 30
+        #   periodSeconds: 10
+      
+      volumes:
+      - name: config-volume
+        configMap:
+          name: cksr-config
+      - name: temp-volume
+        emptyDir: {}
+      
+      # 节点选择器（可选）
+      # nodeSelector:
+      #   kubernetes.io/os: linux
+      
+      # 容忍度（可选）
+      # tolerations:
+      # - key: "key1"
+      #   operator: "Equal"
+      #   value: "value1"
+      #   effect: "NoSchedule"

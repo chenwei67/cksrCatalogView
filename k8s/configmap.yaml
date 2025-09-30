@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cksr-config
+  namespace: default
+data:
+  config.json: |
+    {
+      "clickhouse": {
+        "host": "clickhouse-service",
+        "port": 9000,
+        "username": "default",
+        "password": "your-clickhouse-password",
+        "database": "your-database"
+      },
+      "starrocks": {
+        "host": "starrocks-service",
+        "port": 9030,
+        "username": "root",
+        "password": "your-starrocks-password",
+        "database": "your-database"
+      },
+      "temp_dir": "/tmp/cksr",
+      "driver_url": "http://your-driver-host/clickhouse-jdbc-0.4.6-all.jar"
+    }

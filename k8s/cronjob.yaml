@@ -1,0 +1,72 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cksr-cronjob
+  namespace: default
+  labels:
+    app: cksr
+spec:
+  # 每天凌晨2点执行一次
+  schedule: "0 2 * * *"
+  # 时区设置
+  timeZone: "Asia/Shanghai"
+  # 并发策略：禁止并发执行
+  concurrencyPolicy: Forbid
+  # 保留成功Job的数量
+  successfulJobsHistoryLimit: 3
+  # 保留失败Job的数量
+  failedJobsHistoryLimit: 1
+  # 启动Job的截止时间（秒）
+  startingDeadlineSeconds: 300
+  
+  jobTemplate:
+    spec:
+      completions: 1
+      parallelism: 1
+      backoffLimit: 2
+      # Job完成后自动清理时间（秒）
+      ttlSecondsAfterFinished: 7200
+      template:
+        metadata:
+          labels:
+            app: cksr
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: cksr
+            image: cksr:latest
+            imagePullPolicy: IfNotPresent
+            command: ["./cksr"]
+            args: ["/etc/cksr/config.json"]
+            
+            # 环境变量
+            env:
+            - name: TZ
+              value: "Asia/Shanghai"
+            - name: LOG_LEVEL
+              value: "INFO"
+            
+            # 资源限制
+            resources:
+              requests:
+                memory: "256Mi"
+                cpu: "100m"
+              limits:
+                memory: "1Gi"
+                cpu: "1000m"
+            
+            # 挂载配置文件
+            volumeMounts:
+            - name: config-volume
+              mountPath: /etc/cksr
+              readOnly: true
+            - name: temp-volume
+              mountPath: /tmp/cksr
+          
+          volumes:
+          - name: config-volume
+            configMap:
+              name: cksr-config
+          - name: temp-volume
+            emptyDir:
+              sizeLimit: 1Gi

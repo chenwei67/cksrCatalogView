@@ -1,0 +1,18 @@
+{
+  "clickhouse": {
+    "host": "10.117.64.15",
+    "port": 31003,
+    "username": "root",
+    "password": "QmDunBxpfMpFbydK9P2y",
+    "database": "business"
+  },
+  "starrocks": {
+    "host": "starrocks-fe-service",
+    "port": 9030,
+    "username": "root",
+    "password": "your-starrocks-password",
+    "database": "business"
+  },
+  "temp_dir": "./temp",
+  "driver_url": "http://10.32.45.14/ftpdata/clickhouse-jdbc-0.4.6-all.jar"
+}
