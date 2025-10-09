@@ -94,6 +94,9 @@ func processDatabase(dbManager *database.DatabaseManager, fileManager *fileops.F
 			return fmt.Errorf("解析StarRocks表%s失败: %w", tableName, err)
 		}
 
+		// 过滤掉通过add column操作新增的字段，确保后续流程的健壮性
+		ckTable = filterAddedColumns(ckTable)
+
 		// 生成ALTER TABLE和CREATE VIEW语句
 		alterSQL, viewSQL, err := run(ckTable, srTable, catalogName)
 		if err != nil {
@@ -122,6 +125,22 @@ func processDatabase(dbManager *database.DatabaseManager, fileManager *fileops.F
 	}
 
 	return nil
+}
+
+// filterAddedColumns 过滤掉通过add column操作新增的字段
+func filterAddedColumns(table parser.Table) parser.Table {
+	var filteredFields []parser.Field
+	for _, field := range table.Field {
+		// 过滤掉通过add column新增的字段
+		if !builder.IsAddedColumnByName(field.Name) {
+			filteredFields = append(filteredFields, field)
+		}
+	}
+	
+	// 创建新的表结构，保持其他信息不变
+	filteredTable := table
+	filteredTable.Field = filteredFields
+	return filteredTable
 }
 
 // parseTableFromString 从字符串解析表结构

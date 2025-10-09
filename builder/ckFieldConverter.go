@@ -36,6 +36,17 @@ func (f FieldConverter) originType() string {
 	return t
 }
 
+// IsAddedColumn 检查字段是否是通过add column操作新增的字段
+func (f FieldConverter) IsAddedColumn() bool {
+	// 检查字段名是否包含add column操作的后缀
+	return strings.Contains(f.Name, nameSuffix)
+}
+
+// IsAddedColumnByName 检查给定的字段名是否是通过add column操作新增的字段
+func IsAddedColumnByName(fieldName string) bool {
+	return strings.Contains(fieldName, nameSuffix)
+}
+
 // 对数据类型进行重新解析
 // 如果不支持这种数据类型，就报错
 // 如果支持，构造好当前的fieldConverter，内嵌的Field只需要type和name
@@ -73,10 +84,16 @@ func NewConverters(table parser.Table) ([]FieldConverter, error) {
 	}
 
 	for _, f := range table.Field {
-		// 忽略
+		// 忽略物化字段
 		if f.IsMaterialized {
 			continue
 		}
+		
+		// 过滤掉通过add column操作新增的字段
+		if IsAddedColumnByName(f.Name) {
+			continue
+		}
+		
 		c, err := NewFieldConverter(f, names)
 		if err != nil {
 			return nil, fmt.Errorf("build FieldConverter for %s of table %s.%s failed, %s", f.Name, table.DDL.DBName, table.DDL.TableName, err.Error())
