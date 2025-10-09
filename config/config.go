@@ -23,12 +23,20 @@ type DatabaseConfig struct {
 	Database string `json:"database"`
 }
 
-// Config 应用配置
-type Config struct {
+// DatabasePair 数据库对配置，包含一个ClickHouse和一个StarRocks数据库
+type DatabasePair struct {
+	Name       string         `json:"name"`        // 数据库对的名称标识
 	ClickHouse DatabaseConfig `json:"clickhouse"`
 	StarRocks  DatabaseConfig `json:"starrocks"`
-	TempDir    string         `json:"temp_dir"`
-	DriverURL  string         `json:"driver_url"`
+}
+
+// Config 应用配置
+type Config struct {
+	// 多数据库对配置
+	DatabasePairs []DatabasePair `json:"database_pairs"`
+	
+	TempDir   string `json:"temp_dir"`
+	DriverURL string `json:"driver_url"`
 }
 
 // LoadConfig 从配置文件加载配置
@@ -48,25 +56,52 @@ func LoadConfig(configPath string) (*Config, error) {
 		config.TempDir = "./temp"
 	}
 
+	// 验证配置
+	if len(config.DatabasePairs) == 0 {
+		return nil, fmt.Errorf("至少需要配置一个数据库对")
+	}
+
 	return &config, nil
 }
 
-// GetClickHouseDSN 获取ClickHouse连接字符串
-func (c *Config) GetClickHouseDSN() string {
+// GetClickHouseDSNByIndex 根据索引获取ClickHouse连接字符串
+func (c *Config) GetClickHouseDSNByIndex(index int) string {
+	if index >= len(c.DatabasePairs) {
+		return ""
+	}
+	pair := c.DatabasePairs[index]
 	return fmt.Sprintf("tcp://%s:%d?database=%s&username=%s&password=%s",
-		c.ClickHouse.Host, c.ClickHouse.Port, c.ClickHouse.Database,
-		c.ClickHouse.Username, c.ClickHouse.Password)
+		pair.ClickHouse.Host, pair.ClickHouse.Port, pair.ClickHouse.Database,
+		pair.ClickHouse.Username, pair.ClickHouse.Password)
 }
 
-// GetStarRocksDSN 获取StarRocks连接字符串
-func (c *Config) GetStarRocksDSN() string {
+// GetStarRocksDSNByIndex 根据索引获取StarRocks连接字符串
+func (c *Config) GetStarRocksDSNByIndex(index int) string {
+	if index >= len(c.DatabasePairs) {
+		return ""
+	}
+	pair := c.DatabasePairs[index]
 	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s",
-		c.StarRocks.Username, c.StarRocks.Password,
-		c.StarRocks.Host, c.StarRocks.Port, c.StarRocks.Database)
+		pair.StarRocks.Username, pair.StarRocks.Password,
+		pair.StarRocks.Host, pair.StarRocks.Port, pair.StarRocks.Database)
 }
 
-// GetClickHouseJDBCURI 获取ClickHouse JDBC连接字符串
-func (c *Config) GetClickHouseJDBCURI() string {
+// GetClickHouseJDBCURIByIndex 根据索引获取ClickHouse JDBC连接字符串
+func (c *Config) GetClickHouseJDBCURIByIndex(index int) string {
+	if index >= len(c.DatabasePairs) {
+		return ""
+	}
+	pair := c.DatabasePairs[index]
 	return fmt.Sprintf("jdbc:clickhouse://%s:%d/?database=%s&autoCommit=true&socket_timeout=300000&connection_timeout=10000&compress=true",
-		c.ClickHouse.Host, c.ClickHouse.Port, c.ClickHouse.Database)
+		pair.ClickHouse.Host, pair.ClickHouse.Port, pair.ClickHouse.Database)
+}
+
+// GetDatabasePairByName 根据名称获取数据库对
+func (c *Config) GetDatabasePairByName(name string) (*DatabasePair, bool) {
+	for _, pair := range c.DatabasePairs {
+		if pair.Name == name {
+			return &pair, true
+		}
+	}
+	return nil, false
 }

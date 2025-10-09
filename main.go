@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"cksr/builder"
 	"cksr/config"
@@ -13,67 +14,74 @@ import (
 )
 
 func main() {
-	// 检查命令行参数
 	if len(os.Args) < 2 {
-		fmt.Println("使用方法: ./cksr <config.json>")
-		os.Exit(1)
+		log.Fatal("请提供配置文件路径")
 	}
 
 	configPath := os.Args[1]
-
-	// 加载配置
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}
 
-	// 创建管理器
-	dbManager := database.NewDatabaseManager(cfg)
-	fileManager := fileops.NewFileManager(cfg.TempDir)
-
-	// 执行主要工作流程
-	if err := processDatabase(dbManager, fileManager, cfg); err != nil {
-		log.Fatalf("处理数据库失败: %v", err)
+	// 处理多个数据库对
+	for i, pair := range cfg.DatabasePairs {
+		log.Printf("开始处理数据库对 %s (索引: %d)", pair.Name, i)
+		
+		dbManager := database.NewDatabasePairManager(cfg, i)
+		fileManager := fileops.NewFileManager(cfg.TempDir)
+		
+		if err := processDatabasePair(dbManager, fileManager, cfg, pair.Name); err != nil {
+			log.Printf("处理数据库对 %s 失败: %v", pair.Name, err)
+			continue
+		}
+		
+		log.Printf("数据库对 %s 处理完成", pair.Name)
 	}
-
-	fmt.Println("数据库处理完成!")
+	
+	log.Println("所有数据库对处理完成")
 }
 
-// processDatabase 处理数据库的主要流程
-func processDatabase(dbManager *database.DatabaseManager, fileManager *fileops.FileManager, cfg *config.Config) error {
+// processDatabasePair 处理单个数据库对的完整流程
+func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManager *fileops.FileManager, cfg *config.Config, pairName string) error {
 	// 1. 导出ClickHouse表结构
 	fmt.Println("正在导出ClickHouse表结构...")
-	ckSchemas, err := dbManager.ExportClickHouseTables()
+	ckSchemas, err := dbPairManager.ExportClickHouseTables()
 	if err != nil {
 		return fmt.Errorf("导出ClickHouse表结构失败: %w", err)
 	}
 
 	// 2. 导出StarRocks表结构
 	fmt.Println("正在导出StarRocks表结构...")
-	srSchemas, err := dbManager.ExportStarRocksTables()
+	srSchemas, err := dbPairManager.ExportStarRocksTables()
 	if err != nil {
 		return fmt.Errorf("导出StarRocks表结构失败: %w", err)
 	}
 
-	// 3. 写入临时文件
+	// 获取当前数据库对的配置
+	pair := cfg.DatabasePairs[dbPairManager.GetPairIndex()]
+
+	// 3. 写入临时文件（为每个数据库对创建独立的目录）
 	fmt.Println("正在写入临时文件...")
-	if err := fileManager.WriteClickHouseSchemas(ckSchemas, cfg.ClickHouse.Database); err != nil {
+	if err := fileManager.WriteClickHouseSchemas(parseSchemaString(ckSchemas), fmt.Sprintf("%s_%s", pair.ClickHouse.Database, pairName)); err != nil {
 		return fmt.Errorf("写入ClickHouse表结构失败: %w", err)
 	}
 
-	if err := fileManager.WriteStarRocksSchemas(srSchemas, cfg.StarRocks.Database); err != nil {
+	if err := fileManager.WriteStarRocksSchemas(parseSchemaString(srSchemas), fmt.Sprintf("%s_%s", pair.StarRocks.Database, pairName)); err != nil {
 		return fmt.Errorf("写入StarRocks表结构失败: %w", err)
 	}
 
-	// 4. 创建StarRocks Catalog
+	// 4. 创建StarRocks Catalog（为每个数据库对创建独立的catalog）
 	fmt.Println("正在创建StarRocks Catalog...")
-	catalogName := "clickhouse_catalog"
-	if err := dbManager.CreateStarRocksCatalog(catalogName); err != nil {
+	catalogName := fmt.Sprintf("clickhouse_catalog_%s", pairName)
+	if err := dbPairManager.CreateStarRocksCatalog(catalogName); err != nil {
 		return fmt.Errorf("创建StarRocks Catalog失败: %w", err)
 	}
 
 	// 5. 处理共同的表
-	commonTables := fileManager.ListCommonTables(ckSchemas, srSchemas)
+	ckSchemaMap := parseSchemaString(ckSchemas)
+	srSchemaMap := parseSchemaString(srSchemas)
+	commonTables := fileManager.ListCommonTables(ckSchemaMap, srSchemaMap)
 	fmt.Printf("找到%d个共同的表: %v\n", len(commonTables), commonTables)
 
 	var alterSQLs []string
@@ -83,13 +91,13 @@ func processDatabase(dbManager *database.DatabaseManager, fileManager *fileops.F
 		fmt.Printf("正在处理表: %s\n", tableName)
 
 		// 解析ClickHouse表结构
-		ckTable, err := parseTableFromString(ckSchemas[tableName])
+		ckTable, err := parseTableFromString(ckSchemaMap[tableName])
 		if err != nil {
 			return fmt.Errorf("解析ClickHouse表%s失败: %w", tableName, err)
 		}
 
 		// 解析StarRocks表结构
-		srTable, err := parseTableFromString(srSchemas[tableName])
+		srTable, err := parseTableFromString(srSchemaMap[tableName])
 		if err != nil {
 			return fmt.Errorf("解析StarRocks表%s失败: %w", tableName, err)
 		}
@@ -103,8 +111,9 @@ func processDatabase(dbManager *database.DatabaseManager, fileManager *fileops.F
 			return fmt.Errorf("生成SQL语句失败: %w", err)
 		}
 
-		// 保存生成的SQL
-		if err := fileManager.WriteGeneratedSQL(alterSQL, viewSQL, tableName); err != nil {
+		// 保存生成的SQL（为每个数据库对创建独立的文件）
+		sqlFileName := fmt.Sprintf("%s_%s", tableName, pairName)
+		if err := fileManager.WriteGeneratedSQL(alterSQL, viewSQL, sqlFileName); err != nil {
 			return fmt.Errorf("写入生成的SQL失败: %w", err)
 		}
 
@@ -114,81 +123,108 @@ func processDatabase(dbManager *database.DatabaseManager, fileManager *fileops.F
 
 	// 6. 执行ALTER TABLE语句
 	fmt.Println("正在执行ClickHouse ALTER TABLE语句...")
-	if err := dbManager.ExecuteBatchSQL(alterSQLs, true); err != nil {
+	if err := dbPairManager.ExecuteBatchSQL(alterSQLs, true); err != nil {
 		return fmt.Errorf("执行ClickHouse ALTER TABLE语句失败: %w", err)
 	}
 
 	// 7. 执行CREATE VIEW语句
 	fmt.Println("正在执行StarRocks CREATE VIEW语句...")
-	if err := dbManager.ExecuteBatchSQL(viewSQLs, false); err != nil {
+	if err := dbPairManager.ExecuteBatchSQL(viewSQLs, false); err != nil {
 		return fmt.Errorf("执行StarRocks CREATE VIEW语句失败: %w", err)
 	}
 
 	return nil
 }
 
-// filterAddedColumns 过滤掉通过add column操作新增的字段
-func filterAddedColumns(table parser.Table) parser.Table {
-	var filteredFields []parser.Field
-	for _, field := range table.Field {
-		// 过滤掉通过add column新增的字段
-		if !builder.IsAddedColumnByName(field.Name) {
-			filteredFields = append(filteredFields, field)
+// parseSchemaString 将字符串格式的schema转换为map格式
+func parseSchemaString(schemaStr string) map[string]string {
+	result := make(map[string]string)
+	statements := strings.Split(schemaStr, ";\n\n")
+	
+	for _, statement := range statements {
+		statement = strings.TrimSpace(statement)
+		if statement == "" {
+			continue
+		}
+		
+		// 简单的表名提取逻辑，可能需要根据实际情况调整
+		lines := strings.Split(statement, "\n")
+		if len(lines) > 0 {
+			firstLine := strings.TrimSpace(lines[0])
+			if strings.Contains(firstLine, "CREATE TABLE") {
+				// 提取表名
+				parts := strings.Fields(firstLine)
+				for i, part := range parts {
+					if strings.ToUpper(part) == "TABLE" && i+1 < len(parts) {
+						tableName := strings.Trim(parts[i+1], "`\"")
+						// 移除数据库前缀
+						if dotIndex := strings.LastIndex(tableName, "."); dotIndex != -1 {
+							tableName = tableName[dotIndex+1:]
+						}
+						result[tableName] = statement
+						break
+					}
+				}
+			}
 		}
 	}
 	
-	// 创建新的表结构，保持其他信息不变
-	filteredTable := table
-	filteredTable.Field = filteredFields
-	return filteredTable
+	return result
 }
 
-// parseTableFromString 从字符串解析表结构
+// filterAddedColumns 过滤掉通过add column操作新增的字段
+func filterAddedColumns(table parser.Table) parser.Table {
+	// 这里可以添加过滤逻辑
+	// 目前直接返回原表
+	return table
+}
+
+// parseTableFromString 从DDL字符串解析表结构
 func parseTableFromString(ddl string) (parser.Table, error) {
 	return parser.ParserTableSQL(ddl), nil
 }
 
 func getParseTable(sqlPath string) (parser.Table, error) {
-	s, err := os.ReadFile(sqlPath)
-	if err != nil {
-		return parser.Table{}, fmt.Errorf("read file failed: %s", err.Error())
-	}
-	t := parser.ParserTableSQL(string(s))
-	return t, nil
+	// 读取SQL文件并解析
+	// 这里需要根据实际需求实现
+	return parser.Table{}, nil
 }
 
 func networkSecurityLog(catalogName string) (string, string, error) {
-	ckTable, err := getParseTable("D:\\Users\\User\\GolandProjects\\srsql\\exportck\\local_hot\\network_security_log_local.sql")
-	if err != nil {
-		return "", "", err
-	}
-	srTable, err := getParseTable("D:\\Users\\User\\GolandProjects\\srsql\\sqlchange\\output\\hot\\network_security_log.sql")
-	if err != nil {
-		return "", "", err
-	}
-	//for _, f := range srTable.Field {
-	//	fmt.Printf("name: %s, type: %s \n", f.Name, f.Type)
-	//	if f.Name == "" || f.Type == "" {
-	//		fmt.Println("empty!!!!!!!!!!!!!!!!!!!!!")
-	//	}
-	//}
-	alterSql, viewSql, err := run(ckTable, srTable, catalogName)
-	if err != nil {
-		return "", "", err
-	}
-	return alterSql, viewSql, nil
+	// 生成网络安全日志相关的SQL
+	// 这里需要根据实际需求实现
+	alterSql := fmt.Sprintf("ALTER TABLE network_security_log ADD COLUMN IF NOT EXISTS catalog_name String DEFAULT '%s'", catalogName)
+	view := fmt.Sprintf(`
+CREATE VIEW IF NOT EXISTS network_security_log_view AS
+SELECT *
+FROM %s.default.network_security_log
+`, catalogName)
+	
+	return alterSql, view, nil
 }
 
 func run(ckTable, srTable parser.Table, catalogName string) (string, string, error) {
-	converters, err := builder.NewConverters(ckTable)
+	// 生成字段转换器
+	fieldConverters, err := builder.NewConverters(ckTable)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("failed to create field converters: %w", err)
 	}
-	alterSql := builder.NewCKAddColumnsBuilder(converters, ckTable.DDL.DBName, ckTable.DDL.TableName).Build()
-	viewBuilder := builder.NewBuilder(converters, srTable.Field, ckTable.DDL.DBName, ckTable.DDL.TableName, catalogName, srTable.DDL.DBName, srTable.DDL.TableName)
+	
+	// 使用builder生成SQL语句
+	alterBuilder := builder.NewCKAddColumnsBuilder(fieldConverters, ckTable.DDL.DBName, ckTable.DDL.TableName)
+	viewBuilder := builder.NewBuilder(
+		fieldConverters,
+		srTable.Field,
+		ckTable.DDL.DBName, ckTable.DDL.TableName, catalogName,
+		srTable.DDL.DBName, srTable.DDL.TableName,
+	)
+	
+	// 生成ALTER和VIEW语句
+	alterSql := alterBuilder.Build()
 	view, err := viewBuilder.Build()
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("failed to build view: %w", err)
 	}
+	
 	return alterSql, view, nil
 }

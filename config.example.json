@@ -1,18 +1,40 @@
 {
-  "clickhouse": {
-    "host": "10.117.64.15",
-    "port": 31003,
-    "username": "root",
-    "password": "QmDunBxpfMpFbydK9P2y",
-    "database": "business"
-  },
-  "starrocks": {
-    "host": "starrocks-fe-service",
-    "port": 9030,
-    "username": "root",
-    "password": "your-starrocks-password",
-    "database": "business"
-  },
+  "database_pairs": [
+    {
+      "name": "ck1_sr1",
+      "clickhouse": {
+        "host": "10.117.64.15",
+        "port": 31003,
+        "username": "root",
+        "password": "QmDunBxpfMpFbydK9P2y",
+        "database": "business1"
+      },
+      "starrocks": {
+        "host": "starrocks-fe-service",
+        "port": 9030,
+        "username": "root",
+        "password": "your-starrocks-password",
+        "database": "business1"
+      }
+    },
+    {
+      "name": "ck2_sr2",
+      "clickhouse": {
+        "host": "10.117.64.16",
+        "port": 31003,
+        "username": "root",
+        "password": "AnotherPassword123",
+        "database": "business2"
+      },
+      "starrocks": {
+        "host": "starrocks-fe-service-2",
+        "port": 9030,
+        "username": "root",
+        "password": "another-starrocks-password",
+        "database": "business2"
+      }
+    }
+  ],
   "temp_dir": "./temp",
   "driver_url": "http://10.32.45.14/ftpdata/clickhouse-jdbc-0.4.6-all.jar"
 }

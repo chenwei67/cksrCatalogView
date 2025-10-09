@@ -3,7 +3,7 @@
  * @Date : 2025/1/27
  * @Author : Assistant
  * @Version: 1.0.0
- * @Description: 数据库连接和操作功能
+ * @Description: 数据库连接管理
  */
 
 package database
@@ -11,141 +11,163 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"strings"
 
 	"cksr/config"
 
-	_ "github.com/ClickHouse/clickhouse-go/v2"
+	_ "github.com/ClickHouse/clickhouse-go"
 	_ "github.com/go-sql-driver/mysql"
 )
 
-// DatabaseManager 数据库管理器
-type DatabaseManager struct {
-	config *config.Config
+// DatabasePairManager 数据库对管理器
+type DatabasePairManager struct {
+	config    *config.Config
+	pairIndex int
 }
 
-// NewDatabaseManager 创建数据库管理器
-func NewDatabaseManager(cfg *config.Config) *DatabaseManager {
-	return &DatabaseManager{config: cfg}
+// NewDatabasePairManager 创建数据库对管理器（通过索引）
+func NewDatabasePairManager(cfg *config.Config, pairIndex int) *DatabasePairManager {
+	return &DatabasePairManager{
+		config:    cfg,
+		pairIndex: pairIndex,
+	}
+}
+
+// NewDatabasePairManagerByName 创建数据库对管理器（通过名称）
+func NewDatabasePairManagerByName(cfg *config.Config, pairName string) *DatabasePairManager {
+	for i, pair := range cfg.DatabasePairs {
+		if pair.Name == pairName {
+			return &DatabasePairManager{
+				config:    cfg,
+				pairIndex: i,
+			}
+		}
+	}
+	return nil
 }
 
 // GetClickHouseConnection 获取ClickHouse连接
-func (dm *DatabaseManager) GetClickHouseConnection() (*sql.DB, error) {
-	db, err := sql.Open("clickhouse", dm.config.GetClickHouseDSN())
+func (dm *DatabasePairManager) GetClickHouseConnection() (*sql.DB, error) {
+	dsn := dm.config.GetClickHouseDSNByIndex(dm.pairIndex)
+	if dsn == "" {
+		return nil, fmt.Errorf("无效的数据库对索引: %d", dm.pairIndex)
+	}
+	
+	db, err := sql.Open("clickhouse", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("连接ClickHouse失败: %w", err)
 	}
-
+	
 	if err := db.Ping(); err != nil {
+		db.Close()
 		return nil, fmt.Errorf("ClickHouse连接测试失败: %w", err)
 	}
-
+	
 	return db, nil
 }
 
 // GetStarRocksConnection 获取StarRocks连接
-func (dm *DatabaseManager) GetStarRocksConnection() (*sql.DB, error) {
-	db, err := sql.Open("mysql", dm.config.GetStarRocksDSN())
+func (dm *DatabasePairManager) GetStarRocksConnection() (*sql.DB, error) {
+	dsn := dm.config.GetStarRocksDSNByIndex(dm.pairIndex)
+	if dsn == "" {
+		return nil, fmt.Errorf("无效的数据库对索引: %d", dm.pairIndex)
+	}
+	
+	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("连接StarRocks失败: %w", err)
 	}
-
+	
 	if err := db.Ping(); err != nil {
+		db.Close()
 		return nil, fmt.Errorf("StarRocks连接测试失败: %w", err)
 	}
-
+	
 	return db, nil
 }
 
-// ExportClickHouseTables 导出ClickHouse数据库中所有表的CREATE TABLE语句
-func (dm *DatabaseManager) ExportClickHouseTables() (map[string]string, error) {
+// ExportClickHouseTables 导出ClickHouse表结构
+func (dm *DatabasePairManager) ExportClickHouseTables() (string, error) {
 	db, err := dm.GetClickHouseConnection()
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	defer db.Close()
 
-	// 获取所有表名
-	query := fmt.Sprintf("SHOW TABLES FROM %s", dm.config.ClickHouse.Database)
-	rows, err := db.Query(query)
+	query := "SHOW CREATE TABLE"
+	rows, err := db.Query("SHOW TABLES")
 	if err != nil {
-		return nil, fmt.Errorf("获取ClickHouse表列表失败: %w", err)
+		return "", fmt.Errorf("获取表列表失败: %w", err)
 	}
 	defer rows.Close()
 
-	var tables []string
+	var result strings.Builder
 	for rows.Next() {
 		var tableName string
 		if err := rows.Scan(&tableName); err != nil {
-			return nil, fmt.Errorf("扫描表名失败: %w", err)
+			continue
 		}
-		tables = append(tables, tableName)
+
+		createQuery := fmt.Sprintf("%s %s", query, tableName)
+		var createStatement string
+		if err := db.QueryRow(createQuery).Scan(&createStatement); err != nil {
+			log.Printf("获取表 %s 的创建语句失败: %v", tableName, err)
+			continue
+		}
+
+		result.WriteString(createStatement)
+		result.WriteString(";\n\n")
 	}
 
-	// 导出每个表的CREATE TABLE语句
-	tableSchemas := make(map[string]string)
-	for _, tableName := range tables {
-		createQuery := fmt.Sprintf("SHOW CREATE TABLE %s.%s", dm.config.ClickHouse.Database, tableName)
-		var createSQL string
-		err := db.QueryRow(createQuery).Scan(&createSQL)
-		if err != nil {
-			return nil, fmt.Errorf("获取表%s的CREATE语句失败: %w", tableName, err)
-		}
-		tableSchemas[tableName] = createSQL
-	}
-
-	return tableSchemas, nil
+	return result.String(), nil
 }
 
-// ExportStarRocksTables 导出StarRocks数据库中所有表的CREATE TABLE语句
-func (dm *DatabaseManager) ExportStarRocksTables() (map[string]string, error) {
+// ExportStarRocksTables 导出StarRocks表结构
+func (dm *DatabasePairManager) ExportStarRocksTables() (string, error) {
 	db, err := dm.GetStarRocksConnection()
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	defer db.Close()
 
-	// 获取所有表名
-	query := fmt.Sprintf("SHOW TABLES FROM %s", dm.config.StarRocks.Database)
-	rows, err := db.Query(query)
+	pair := dm.config.DatabasePairs[dm.pairIndex]
+	
+	rows, err := db.Query(fmt.Sprintf("SHOW TABLES FROM %s", pair.StarRocks.Database))
 	if err != nil {
-		return nil, fmt.Errorf("获取StarRocks表列表失败: %w", err)
+		return "", fmt.Errorf("获取表列表失败: %w", err)
 	}
 	defer rows.Close()
 
-	var tables []string
+	var result strings.Builder
 	for rows.Next() {
 		var tableName string
 		if err := rows.Scan(&tableName); err != nil {
-			return nil, fmt.Errorf("扫描表名失败: %w", err)
+			continue
 		}
-		tables = append(tables, tableName)
-	}
 
-	// 导出每个表的CREATE TABLE语句
-	tableSchemas := make(map[string]string)
-	for _, tableName := range tables {
-		createQuery := fmt.Sprintf("SHOW CREATE TABLE %s.%s", dm.config.StarRocks.Database, tableName)
-		rows, err := db.Query(createQuery)
+		createQuery := fmt.Sprintf("SHOW CREATE TABLE %s.%s", pair.StarRocks.Database, tableName)
+		rows2, err := db.Query(createQuery)
 		if err != nil {
-			return nil, fmt.Errorf("获取表%s的CREATE语句失败: %w", tableName, err)
+			log.Printf("获取表 %s 的创建语句失败: %v", tableName, err)
+			continue
 		}
-		defer rows.Close()
 
-		if rows.Next() {
-			var table, createSQL string
-			if err := rows.Scan(&table, &createSQL); err != nil {
-				return nil, fmt.Errorf("扫描CREATE语句失败: %w", err)
+		if rows2.Next() {
+			var table, createStatement string
+			if err := rows2.Scan(&table, &createStatement); err == nil {
+				result.WriteString(createStatement)
+				result.WriteString(";\n\n")
 			}
-			tableSchemas[tableName] = createSQL
 		}
+		rows2.Close()
 	}
 
-	return tableSchemas, nil
+	return result.String(), nil
 }
 
-// ExecuteClickHouseSQL 在ClickHouse中执行SQL语句
-func (dm *DatabaseManager) ExecuteClickHouseSQL(sql string) error {
+// ExecuteClickHouseSQL 执行ClickHouse SQL
+func (dm *DatabasePairManager) ExecuteClickHouseSQL(sql string) error {
 	db, err := dm.GetClickHouseConnection()
 	if err != nil {
 		return err
@@ -153,15 +175,11 @@ func (dm *DatabaseManager) ExecuteClickHouseSQL(sql string) error {
 	defer db.Close()
 
 	_, err = db.Exec(sql)
-	if err != nil {
-		return fmt.Errorf("执行ClickHouse SQL失败: %w", err)
-	}
-
-	return nil
+	return err
 }
 
-// ExecuteStarRocksSQL 在StarRocks中执行SQL语句
-func (dm *DatabaseManager) ExecuteStarRocksSQL(sql string) error {
+// ExecuteStarRocksSQL 执行StarRocks SQL
+func (dm *DatabasePairManager) ExecuteStarRocksSQL(sql string) error {
 	db, err := dm.GetStarRocksConnection()
 	if err != nil {
 		return err
@@ -169,36 +187,41 @@ func (dm *DatabaseManager) ExecuteStarRocksSQL(sql string) error {
 	defer db.Close()
 
 	_, err = db.Exec(sql)
-	if err != nil {
-		return fmt.Errorf("执行StarRocks SQL失败: %w", err)
-	}
-
-	return nil
+	return err
 }
 
-// CreateStarRocksCatalog 在StarRocks中创建ClickHouse Catalog
-func (dm *DatabaseManager) CreateStarRocksCatalog(catalogName string) error {
-	catalogSQL := fmt.Sprintf(`
-CREATE EXTERNAL CATALOG IF NOT EXISTS %s
-PROPERTIES (
-    "type" = "jdbc",
-    "user" = "%s",
-    "password" = "%s",
-    "jdbc_uri" = "%s",
-    "driver_url" = "%s",
-    "driver_class" = "com.clickhouse.jdbc.ClickHouseDriver"
-);`, catalogName,
-		dm.config.ClickHouse.Username,
-		dm.config.ClickHouse.Password,
-		dm.config.GetClickHouseJDBCURI(),
-		dm.config.DriverURL)
+// CreateStarRocksCatalog 创建StarRocks Catalog
+func (dm *DatabasePairManager) CreateStarRocksCatalog(catalogName string) error {
+	jdbcURI := dm.config.GetClickHouseJDBCURIByIndex(dm.pairIndex)
+	if jdbcURI == "" {
+		return fmt.Errorf("无效的数据库对索引: %d", dm.pairIndex)
+	}
+	
+	pair := dm.config.DatabasePairs[dm.pairIndex]
+	
+	createCatalogSQL := fmt.Sprintf(`
+		CREATE EXTERNAL CATALOG IF NOT EXISTS %s
+		PROPERTIES (
+			"type" = "jdbc",
+			"user" = "%s",
+			"password" = "%s",
+			"jdbc_uri" = "%s",
+			"driver_url" = "%s",
+			"driver_class" = "com.clickhouse.jdbc.ClickHouseDriver"
+		)`,
+		catalogName,
+		pair.ClickHouse.Username,
+		pair.ClickHouse.Password,
+		jdbcURI,
+		dm.config.DriverURL,
+	)
 
-	return dm.ExecuteStarRocksSQL(catalogSQL)
+	return dm.ExecuteStarRocksSQL(createCatalogSQL)
 }
 
 // ExecuteBatchSQL 批量执行SQL语句
-func (dm *DatabaseManager) ExecuteBatchSQL(sqls []string, isClickHouse bool) error {
-	for _, sql := range sqls {
+func (dm *DatabasePairManager) ExecuteBatchSQL(sqlStatements []string, isClickHouse bool) error {
+	for _, sql := range sqlStatements {
 		sql = strings.TrimSpace(sql)
 		if sql == "" {
 			continue
@@ -216,4 +239,17 @@ func (dm *DatabaseManager) ExecuteBatchSQL(sqls []string, isClickHouse bool) err
 		}
 	}
 	return nil
+}
+
+// GetPairName 获取数据库对名称
+func (dm *DatabasePairManager) GetPairName() string {
+	if dm.pairIndex >= len(dm.config.DatabasePairs) {
+		return ""
+	}
+	return dm.config.DatabasePairs[dm.pairIndex].Name
+}
+
+// GetPairIndex 获取数据库对索引
+func (dm *DatabasePairManager) GetPairIndex() int {
+	return dm.pairIndex
 }
