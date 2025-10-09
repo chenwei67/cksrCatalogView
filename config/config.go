@@ -25,10 +25,11 @@ type DatabaseConfig struct {
 
 // DatabasePair 数据库对配置，包含一个ClickHouse和一个StarRocks数据库
 type DatabasePair struct {
-	Name        string         `json:"name"`         // 数据库对的名称标识
-	CatalogName string         `json:"catalog_name"` // StarRocks中的Catalog名称
-	ClickHouse  DatabaseConfig `json:"clickhouse"`
-	StarRocks   DatabaseConfig `json:"starrocks"`
+    Name        string         `json:"name"`         // 数据库对的名称标识
+    CatalogName string         `json:"catalog_name"` // StarRocks中的Catalog名称
+    SRTableSuffix string       `json:"sr_table_suffix"` // StarRocks表统一后缀（用于批量重命名）
+    ClickHouse  DatabaseConfig `json:"clickhouse"`
+    StarRocks   DatabaseConfig `json:"starrocks"`
 }
 
 // Config 应用配置

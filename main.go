@@ -27,25 +27,25 @@ func main() {
 	// 处理多个数据库对
 	for i, pair := range cfg.DatabasePairs {
 		log.Printf("开始处理数据库对 %s (索引: %d)", pair.Name, i)
-		
+
 		dbManager := database.NewDatabasePairManager(cfg, i)
 		fileManager := fileops.NewFileManager(cfg.TempDir)
-		
+
 		if err := processDatabasePair(dbManager, fileManager, cfg, pair); err != nil {
 			log.Printf("处理数据库对 %s 失败: %v", pair.Name, err)
 			continue
 		}
-		
+
 		log.Printf("数据库对 %s 处理完成", pair.Name)
 	}
-	
+
 	log.Println("所有数据库对处理完成")
 }
 
 // processDatabasePair 处理单个数据库对的完整流程
 func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManager *fileops.FileManager, cfg *config.Config, pair config.DatabasePair) error {
 	pairName := pair.Name
-	
+
 	// 1. 导出ClickHouse表结构
 	fmt.Println("正在导出ClickHouse表结构...")
 	ckSchemas, err := dbPairManager.ExportClickHouseTables()
@@ -86,6 +86,28 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 	commonTables := fileManager.ListCommonTables(ckSchemaMap, srSchemaMap)
 	fmt.Printf("找到%d个共同的表: %v\n", len(commonTables), commonTables)
 
+	// 5.1 在SR侧统一追加表后缀（若已包含则跳过），并生成重命名SQL
+	suffix := strings.TrimSpace(pair.SRTableSuffix)
+	var renameSQLs []string
+	if suffix != "" {
+		for _, tableName := range commonTables {
+			// 如果表名已经以后缀结尾，则跳过重命名
+			if strings.HasSuffix(tableName, suffix) {
+				continue
+			}
+			newName := tableName + suffix
+			renameSQL := fmt.Sprintf("RENAME TABLE `%s`.`%s` TO `%s`.`%s`", pair.StarRocks.Database, tableName, pair.StarRocks.Database, newName)
+			renameSQLs = append(renameSQLs, renameSQL)
+			// 更新srSchemaMap键，以便后续解析和视图生成使用新表名
+			if ddl, ok := srSchemaMap[tableName]; ok {
+				delete(srSchemaMap, tableName)
+				// 粗略替换DDL中的表名（仅用于解析），实际以SHOW CREATE原始DDL为准
+				ddl = strings.ReplaceAll(ddl, fmt.Sprintf("%s.%s", pair.StarRocks.Database, tableName), fmt.Sprintf("%s.%s", pair.StarRocks.Database, newName))
+				srSchemaMap[newName] = ddl
+			}
+		}
+	}
+
 	var alterSQLs []string
 	var viewSQLs []string
 
@@ -98,11 +120,22 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 			return fmt.Errorf("解析ClickHouse表%s失败: %w", tableName, err)
 		}
 
-		// 解析StarRocks表结构
-		srTable, err := parseTableFromString(srSchemaMap[tableName])
-		if err != nil {
-			return fmt.Errorf("解析StarRocks表%s失败: %w", tableName, err)
+		// 解析StarRocks表结构（考虑可能已重命名的新表名）
+		srLookupName := tableName
+		if suffix != "" && !strings.HasSuffix(tableName, suffix) {
+			srLookupName = tableName + suffix
 		}
+		srDDL, ok := srSchemaMap[srLookupName]
+		if !ok {
+			return fmt.Errorf("未找到StarRocks表%s的DDL（考虑后缀%s）", srLookupName, suffix)
+		}
+		srTable, err := parseTableFromString(srDDL)
+		if err != nil {
+			return fmt.Errorf("解析StarRocks表%s失败: %w", srLookupName, err)
+		}
+		// 强制覆盖解析得到的SR表名，确保视图生成使用重命名后的新表名
+		srTable.DDL.DBName = pair.StarRocks.Database
+		srTable.DDL.TableName = srLookupName
 
 		// 过滤掉通过add column操作新增的字段，确保后续流程的健壮性
 		ckTable = filterAddedColumns(ckTable)
@@ -123,7 +156,15 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 		viewSQLs = append(viewSQLs, viewSQL)
 	}
 
-	// 6. 批量执行SQL语句
+	// 6. 先执行SR表重命名，再执行ALTER和VIEW语句
+	if len(renameSQLs) > 0 {
+		fmt.Println("正在执行SR表重命名语句...")
+		if err := dbPairManager.ExecuteBatchSQL(renameSQLs, false); err != nil {
+			return fmt.Errorf("执行SR表重命名语句失败: %w", err)
+		}
+	}
+
+	// 6.1 执行ALTER TABLE语句
 	fmt.Println("正在执行ALTER TABLE语句...")
 	if err := dbPairManager.ExecuteBatchSQL(alterSQLs, true); err != nil {
 		return fmt.Errorf("执行ALTER TABLE语句失败: %w", err)
@@ -142,13 +183,13 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 func parseSchemaString(schemaStr string) map[string]string {
 	result := make(map[string]string)
 	statements := strings.Split(schemaStr, ";\n\n")
-	
+
 	for _, statement := range statements {
 		statement = strings.TrimSpace(statement)
 		if statement == "" {
 			continue
 		}
-		
+
 		// 简单的表名提取逻辑，可能需要根据实际情况调整
 		lines := strings.Split(statement, "\n")
 		if len(lines) > 0 {
@@ -170,7 +211,7 @@ func parseSchemaString(schemaStr string) map[string]string {
 			}
 		}
 	}
-	
+
 	return result
 }
 
@@ -201,7 +242,7 @@ CREATE VIEW IF NOT EXISTS network_security_log_view AS
 SELECT *
 FROM %s.default.network_security_log
 `, catalogName)
-	
+
 	return alterSql, view, nil
 }
 
@@ -211,7 +252,7 @@ func run(ckTable, srTable parser.Table, catalogName string) (string, string, err
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create field converters: %w", err)
 	}
-	
+
 	// 使用builder生成SQL语句
 	alterBuilder := builder.NewCKAddColumnsBuilder(fieldConverters, ckTable.DDL.DBName, ckTable.DDL.TableName)
 	viewBuilder := builder.NewBuilder(
@@ -220,13 +261,13 @@ func run(ckTable, srTable parser.Table, catalogName string) (string, string, err
 		ckTable.DDL.DBName, ckTable.DDL.TableName, catalogName,
 		srTable.DDL.DBName, srTable.DDL.TableName,
 	)
-	
+
 	// 生成ALTER和VIEW语句
 	alterSql := alterBuilder.Build()
 	view, err := viewBuilder.Build()
 	if err != nil {
 		return "", "", fmt.Errorf("failed to build view: %w", err)
 	}
-	
+
 	return alterSql, view, nil
 }
