@@ -31,7 +31,7 @@ func main() {
 		dbManager := database.NewDatabasePairManager(cfg, i)
 		fileManager := fileops.NewFileManager(cfg.TempDir)
 		
-		if err := processDatabasePair(dbManager, fileManager, cfg, pair.Name); err != nil {
+		if err := processDatabasePair(dbManager, fileManager, cfg, pair); err != nil {
 			log.Printf("处理数据库对 %s 失败: %v", pair.Name, err)
 			continue
 		}
@@ -43,7 +43,9 @@ func main() {
 }
 
 // processDatabasePair 处理单个数据库对的完整流程
-func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManager *fileops.FileManager, cfg *config.Config, pairName string) error {
+func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManager *fileops.FileManager, cfg *config.Config, pair config.DatabasePair) error {
+	pairName := pair.Name
+	
 	// 1. 导出ClickHouse表结构
 	fmt.Println("正在导出ClickHouse表结构...")
 	ckSchemas, err := dbPairManager.ExportClickHouseTables()
@@ -58,11 +60,7 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 		return fmt.Errorf("导出StarRocks表结构失败: %w", err)
 	}
 
-	// 获取当前数据库对的配置
-	pair := cfg.DatabasePairs[dbPairManager.GetPairIndex()]
-
-	// 3. 写入临时文件（为每个数据库对创建独立的目录）
-	fmt.Println("正在写入临时文件...")
+	// 3. 写入文件
 	if err := fileManager.WriteClickHouseSchemas(parseSchemaString(ckSchemas), fmt.Sprintf("%s_%s", pair.ClickHouse.Database, pairName)); err != nil {
 		return fmt.Errorf("写入ClickHouse表结构失败: %w", err)
 	}
@@ -71,9 +69,13 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 		return fmt.Errorf("写入StarRocks表结构失败: %w", err)
 	}
 
-	// 4. 创建StarRocks Catalog（为每个数据库对创建独立的catalog）
+	// 4. 创建StarRocks Catalog（使用配置中指定的catalog名称）
 	fmt.Println("正在创建StarRocks Catalog...")
-	catalogName := fmt.Sprintf("clickhouse_catalog_%s", pairName)
+	catalogName := pair.CatalogName
+	if catalogName == "" {
+		// 如果没有配置catalog名称，使用默认格式
+		catalogName = fmt.Sprintf("clickhouse_catalog_%s", pairName)
+	}
 	if err := dbPairManager.CreateStarRocksCatalog(catalogName); err != nil {
 		return fmt.Errorf("创建StarRocks Catalog失败: %w", err)
 	}
@@ -121,18 +123,18 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 		viewSQLs = append(viewSQLs, viewSQL)
 	}
 
-	// 6. 执行ALTER TABLE语句
-	fmt.Println("正在执行ClickHouse ALTER TABLE语句...")
+	// 6. 批量执行SQL语句
+	fmt.Println("正在执行ALTER TABLE语句...")
 	if err := dbPairManager.ExecuteBatchSQL(alterSQLs, true); err != nil {
-		return fmt.Errorf("执行ClickHouse ALTER TABLE语句失败: %w", err)
+		return fmt.Errorf("执行ALTER TABLE语句失败: %w", err)
 	}
 
-	// 7. 执行CREATE VIEW语句
-	fmt.Println("正在执行StarRocks CREATE VIEW语句...")
+	fmt.Println("正在执行CREATE VIEW语句...")
 	if err := dbPairManager.ExecuteBatchSQL(viewSQLs, false); err != nil {
-		return fmt.Errorf("执行StarRocks CREATE VIEW语句失败: %w", err)
+		return fmt.Errorf("执行CREATE VIEW语句失败: %w", err)
 	}
 
+	fmt.Printf("数据库对 %s 处理完成\n", pairName)
 	return nil
 }
 

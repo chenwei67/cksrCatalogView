@@ -2,6 +2,7 @@
   "database_pairs": [
     {
       "name": "ck1_sr1",
+      "catalog_name": "ck_business1_catalog",
       "clickhouse": {
         "host": "10.117.64.15",
         "port": 31003,
@@ -19,6 +20,7 @@
     },
     {
       "name": "ck2_sr2",
+      "catalog_name": "ck_business2_catalog",
       "clickhouse": {
         "host": "10.117.64.16",
         "port": 31003,
