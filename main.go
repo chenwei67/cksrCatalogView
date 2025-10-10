@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"cksr/builder"
 	"cksr/config"
@@ -162,42 +163,54 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 	var alterSQLs []string
 	var viewSQLs []string
 
-	for _, tableName := range commonTables {
-		fmt.Printf("正在处理表: %s\n", tableName)
+	fmt.Printf("\n开始处理表，总共 %d 个表需要处理...\n", len(commonTables))
+	for i, tableName := range commonTables {
+		fmt.Printf("\n[%d/%d] 正在处理表: %s\n", i+1, len(commonTables), tableName)
 
 		// 解析ClickHouse表结构
+		fmt.Printf("  - 正在解析ClickHouse表结构...\n")
 		ckTable, err := parseTableFromString(ckSchemaMap[tableName], pair.ClickHouse.Database, tableName)
 		if err != nil {
 			return fmt.Errorf("解析ClickHouse表%s失败: %w", tableName, err)
 		}
+		fmt.Printf("  - ClickHouse表结构解析完成\n")
 
 		// 解析StarRocks表结构（直接获取DDL）
 		srTableName := srTableMap[tableName] // 获取重命名后的实际表名
+		fmt.Printf("  - 正在获取StarRocks表DDL (表名: %s)...\n", srTableName)
 		srDDL, err := dbPairManager.GetStarRocksTableDDL(srTableName)
 		if err != nil {
 			return fmt.Errorf("获取StarRocks表%s的DDL失败: %w", srTableName, err)
 		}
+		fmt.Printf("  - StarRocks表DDL获取完成\n")
 		
 		// 直接构造StarRocks表结构，避免依赖parseSchemaString的解析
+		fmt.Printf("  - 正在解析StarRocks表结构...\n")
 		srTable, err := parseTableFromString(srDDL, pair.StarRocks.Database, srTableName)
 		if err != nil {
 			return fmt.Errorf("解析StarRocks表%s失败: %w", srTableName, err)
 		}
+		fmt.Printf("  - StarRocks表结构解析完成\n")
 
 		// 过滤掉通过add column操作新增的字段，确保后续流程的健壮性
+		fmt.Printf("  - 正在过滤字段...\n")
 		ckTable = filterAddedColumns(ckTable)
 
 		// 生成ALTER TABLE和CREATE VIEW语句
+		fmt.Printf("  - 正在生成SQL语句...\n")
 		alterSQL, viewSQL, err := run(ckTable, srTable, catalogName)
 		if err != nil {
 			return fmt.Errorf("生成SQL语句失败: %w", err)
 		}
+		fmt.Printf("  - SQL语句生成完成\n")
 
 		// 保存生成的SQL（为每个数据库对创建独立的文件）
+		fmt.Printf("  - 正在保存SQL文件...\n")
 		sqlFileName := fmt.Sprintf("%s_%s", tableName, pairName)
 		if err := fileManager.WriteGeneratedSQL(alterSQL, viewSQL, sqlFileName); err != nil {
 			return fmt.Errorf("写入生成的SQL失败: %w", err)
 		}
+		fmt.Printf("  - 表 %s 处理完成\n\n", tableName)
 
 		alterSQLs = append(alterSQLs, alterSQL)
 		viewSQLs = append(viewSQLs, viewSQL)
@@ -229,13 +242,30 @@ func filterAddedColumns(table parser.Table) parser.Table {
 
 // parseTableFromString 从DDL字符串解析表结构，并设置正确的数据库名和表名
 func parseTableFromString(ddl string, dbName string, tableName string) (parser.Table, error) {
-	table := parser.ParserTableSQL(ddl)
+	fmt.Printf("    - 开始解析DDL，长度: %d 字符\n", len(ddl))
+	fmt.Printf("    - DDL前100字符: %s...\n", ddl[:min(100, len(ddl))])
 	
-	// 强制设置正确的数据库名和表名，避免依赖DDL中的解析结果
-	table.DDL.DBName = dbName
-	table.DDL.TableName = tableName
+	// 使用超时机制防止解析阻塞
+	done := make(chan parser.Table, 1)
+	go func() {
+		fmt.Printf("    - 调用ParserTableSQL函数...\n")
+		table := parser.ParserTableSQL(ddl)
+		fmt.Printf("    - ParserTableSQL函数执行完成\n")
+		done <- table
+	}()
 	
-	return table, nil
+	select {
+	case table := <-done:
+		fmt.Printf("    - DDL解析成功\n")
+		// 强制设置正确的数据库名和表名，避免依赖DDL中的解析结果
+		table.DDL.DBName = dbName
+		table.DDL.TableName = tableName
+		fmt.Printf("    - 设置数据库名: %s, 表名: %s\n", dbName, tableName)
+		return table, nil
+	case <-time.After(60 * time.Second):
+		fmt.Printf("    - DDL解析超时 (60秒)\n")
+		return parser.Table{}, fmt.Errorf("DDL解析超时")
+	}
 }
 
 func getParseTable(sqlPath string) (parser.Table, error) {

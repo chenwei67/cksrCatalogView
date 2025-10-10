@@ -9,6 +9,7 @@
 package parser
 
 import (
+	"fmt"
 	"strings"
 )
 
@@ -62,23 +63,35 @@ func fetchValFromFunc(s string) string {
 }
 
 func ParserTableSQL(s string) Table {
+	fmt.Printf("      - ParserTableSQL开始执行\n")
 	var t = Table{}
 	lines := strings.Split(s, "\n")
+	fmt.Printf("      - DDL分割为 %d 行\n", len(lines))
+	
 	for index := 0; index < len(lines); index++ {
 		line := strings.TrimSpace(lines[index])
+		if index%10 == 0 {
+			fmt.Printf("      - 正在处理第 %d/%d 行\n", index+1, len(lines))
+		}
+		
 		if pass(line) {
 			continue
 		}
 		if t.parserTableName(line) {
+			fmt.Printf("      - 解析到表名: %s\n", t.DDL.TableName)
 			continue
 		}
 		if t.parserField(line) {
+			if len(t.Field) > 0 {
+				fmt.Printf("      - 解析到字段: %s (总计 %d 个字段)\n", t.Field[len(t.Field)-1].Name, len(t.Field))
+			}
 			continue
 		}
 		if t.parserIndex(line) {
 			continue
 		}
 		if t.parserEngine(line) {
+			fmt.Printf("      - 解析到引擎: %s\n", t.DDL.Engine)
 			continue
 		}
 		if t.parserPartitionss(line) {
@@ -91,5 +104,6 @@ func ParserTableSQL(s string) Table {
 			continue
 		}
 	}
+	fmt.Printf("      - ParserTableSQL执行完成，解析到 %d 个字段\n", len(t.Field))
 	return t
 }

@@ -9,10 +9,12 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"cksr/config"
 
@@ -152,26 +154,36 @@ func (dm *DatabasePairManager) GetStarRocksTableNames() ([]string, error) {
 
 // GetStarRocksTableDDL 获取指定表的DDL语句
 func (dm *DatabasePairManager) GetStarRocksTableDDL(tableName string) (string, error) {
+	fmt.Printf("    - 正在连接StarRocks数据库...\n")
 	db, err := dm.GetStarRocksConnection()
 	if err != nil {
 		return "", err
 	}
 	defer db.Close()
+	fmt.Printf("    - StarRocks数据库连接成功\n")
 
 	pair := dm.config.DatabasePairs[dm.pairIndex]
 
 	createQuery := fmt.Sprintf("SHOW CREATE TABLE %s.%s", pair.StarRocks.Database, tableName)
-	rows, err := db.Query(createQuery)
+	fmt.Printf("    - 执行查询: %s\n", createQuery)
+	
+	// 设置查询超时
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	
+	rows, err := db.QueryContext(ctx, createQuery)
 	if err != nil {
 		return "", fmt.Errorf("获取表 %s 的创建语句失败: %w", tableName, err)
 	}
 	defer rows.Close()
+	fmt.Printf("    - 查询执行完成，正在读取结果...\n")
 
 	if rows.Next() {
 		var table, createStatement string
 		if err := rows.Scan(&table, &createStatement); err != nil {
 			return "", fmt.Errorf("扫描表 %s 的创建语句失败: %w", tableName, err)
 		}
+		fmt.Printf("    - DDL读取完成，长度: %d 字符\n", len(createStatement))
 		return createStatement, nil
 	}
 

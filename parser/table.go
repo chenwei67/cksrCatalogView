@@ -18,13 +18,54 @@ func (t *Table) parserTableName(s string) bool {
 	if !strings.HasPrefix(s, indexStr) {
 		return false
 	}
-	ss := strings.Split(s, " ")
-	t.DDL.TableName = ss[len(ss)-1]
-	if strings.Contains(t.DDL.TableName, ".") {
-		names := strings.Split(t.DDL.TableName, ".")
-		t.DDL.DBName = names[0]
-		t.DDL.TableName = names[1]
+	
+	fmt.Printf("        - 解析CREATE TABLE行: %s\n", s)
+	
+	// 移除CREATE TABLE前缀
+	remaining := strings.TrimSpace(s[len(indexStr):])
+	fmt.Printf("        - 移除CREATE TABLE后: %s\n", remaining)
+	
+	// 找到表名部分（在第一个空格或括号之前）
+	var tableName string
+	
+	// 处理带反引号的表名
+	if strings.HasPrefix(remaining, "`") {
+		// 找到第二个反引号的位置
+		endQuote := strings.Index(remaining[1:], "`")
+		if endQuote != -1 {
+			tableName = remaining[1 : endQuote+1] // 不包含反引号
+		}
+	} else {
+		// 处理不带反引号的表名
+		parts := strings.Fields(remaining)
+		if len(parts) > 0 {
+			tableName = parts[0]
+			// 移除可能的括号
+			if strings.Contains(tableName, "(") {
+				tableName = strings.Split(tableName, "(")[0]
+			}
+		}
 	}
+	
+	fmt.Printf("        - 提取的表名: %s\n", tableName)
+	
+	if tableName == "" {
+		fmt.Printf("        - 表名解析失败\n")
+		return false
+	}
+	
+	// 处理数据库名.表名的格式
+	if strings.Contains(tableName, ".") {
+		names := strings.Split(tableName, ".")
+		if len(names) >= 2 {
+			t.DDL.DBName = strings.Trim(names[0], "`")
+			t.DDL.TableName = strings.Trim(names[1], "`")
+		}
+	} else {
+		t.DDL.TableName = strings.Trim(tableName, "`")
+	}
+	
+	fmt.Printf("        - 最终解析结果 - 数据库: %s, 表名: %s\n", t.DDL.DBName, t.DDL.TableName)
 	return true
 }
 
