@@ -18,6 +18,7 @@ import (
 type DatabaseConfig struct {
 	Host     string `json:"host"`
 	Port     int    `json:"port"`
+	HTTPPort int    `json:"http_port"` // HTTP端口，用于JDBC连接
 	Username string `json:"username"`
 	Password string `json:"password"`
 	Database string `json:"database"`
@@ -25,18 +26,18 @@ type DatabaseConfig struct {
 
 // DatabasePair 数据库对配置，包含一个ClickHouse和一个StarRocks数据库
 type DatabasePair struct {
-    Name        string         `json:"name"`         // 数据库对的名称标识
-    CatalogName string         `json:"catalog_name"` // StarRocks中的Catalog名称
-    SRTableSuffix string       `json:"sr_table_suffix"` // StarRocks表统一后缀（用于批量重命名）
-    ClickHouse  DatabaseConfig `json:"clickhouse"`
-    StarRocks   DatabaseConfig `json:"starrocks"`
+	Name          string         `json:"name"`            // 数据库对的名称标识
+	CatalogName   string         `json:"catalog_name"`    // StarRocks中的Catalog名称
+	SRTableSuffix string         `json:"sr_table_suffix"` // StarRocks表统一后缀（用于批量重命名）
+	ClickHouse    DatabaseConfig `json:"clickhouse"`
+	StarRocks     DatabaseConfig `json:"starrocks"`
 }
 
 // Config 应用配置
 type Config struct {
 	// 多数据库对配置
 	DatabasePairs []DatabasePair `json:"database_pairs"`
-	
+
 	TempDir   string `json:"temp_dir"`
 	DriverURL string `json:"driver_url"`
 }
@@ -95,7 +96,7 @@ func (c *Config) GetClickHouseJDBCURIByIndex(index int) string {
 	}
 	pair := c.DatabasePairs[index]
 	return fmt.Sprintf("jdbc:clickhouse://%s:%d/?database=%s&autoCommit=true&socket_timeout=300000&connection_timeout=10000&compress=true",
-		pair.ClickHouse.Host, pair.ClickHouse.Port, pair.ClickHouse.Database)
+		pair.ClickHouse.Host, pair.ClickHouse.HTTPPort, pair.ClickHouse.Database)
 }
 
 // GetDatabasePairByName 根据名称获取数据库对

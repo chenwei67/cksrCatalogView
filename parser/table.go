@@ -70,6 +70,7 @@ func (t *Table) parserTableName(s string) bool {
 }
 
 func fetchWord(ss string, begin int) (string, int) {
+	// 跳过开头的空格
 	for ; begin < len(ss); begin++ {
 		if ss[begin] == ' ' {
 			continue
@@ -78,22 +79,27 @@ func fetchWord(ss string, begin int) (string, int) {
 	}
 
 	s := []rune(ss)
-
 	var word string
 	var stack = make([]rune, 100)
 	var stackIndex = 1
+	inQuotes := false  // 添加引号状态跟踪
 
 	for ; begin <= len(s)-1; begin++ {
 		if begin == len(s)-1 && s[begin] == ',' {
 			break
 		}
-		if s[begin] == ' ' && stackIndex <= 1 {
+		
+		// 关键修复：只有在非引号内才因空格退出
+		if s[begin] == ' ' && stackIndex <= 1 && !inQuotes {
 			break
 		}
+		
 		word += string(s[begin])
 
 		switch s[begin] {
-		case 39:
+		case '"':  // 处理双引号
+			inQuotes = !inQuotes
+		case 39:   // 处理单引号
 			if stack[stackIndex-1] == 39 {
 				stackIndex--
 			} else {
@@ -123,10 +129,12 @@ func fetchWord(ss string, begin int) (string, int) {
 			}
 		}
 	}
+	
 	if stackIndex > 1 {
 		fmt.Println("字段解析异常,括号退栈失败,", ss, "|", len(stack), stackIndex)
 		panic("字段解析异常,括号退栈失败")
 	}
+	
 	return word, begin
 }
 

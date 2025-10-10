@@ -82,6 +82,10 @@ func NewCKTableBuilder(fieldConverters []FieldConverter, tableName, dbName, cata
 func NewSRTableBuilder(fields []parser.Field, tableName, dbName string) SRTableBuilder {
 	m := make(map[string]SRField)
 	for _, f := range fields {
+		// 忽略syncFromCK字段，这是StarRocks专用的标识字段，不参与视图映射
+		if f.Name == "syncFromCK" {
+			continue
+		}
 		m[f.Name] = SRField{
 			Field: f,
 		}
@@ -197,7 +201,7 @@ func (v *ViewBuilder) Build() (string, error) {
 }
 
 func (v *ViewBuilder) GenViewSQL(ckQ, srQ string) string {
-	return fmt.Sprintf("create view %s as \n%s \nunion all \n%s; \n", v.sr.Name, ckQ, srQ)
+	return fmt.Sprintf("create view %s.%s as \n%s \nunion all \n%s; \n", v.dbName, v.viewName, ckQ, srQ)
 }
 
 // 是rowLogAlias

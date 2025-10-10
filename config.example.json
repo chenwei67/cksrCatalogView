@@ -7,6 +7,7 @@
       "clickhouse": {
         "host": "10.117.64.15",
         "port": 31004,
+        "http_port": 31003,
         "username": "root",
         "password": "QmDunBxpfMpFbydK9P2y",
         "database": "business"

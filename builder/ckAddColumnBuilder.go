@@ -88,18 +88,40 @@ func NewCKAddColumnsBuilder(fieldConverters []FieldConverter, dbName string, tab
 }
 
 func (c CKAddColumnsBuilder) Build() string {
+	// 如果没有需要添加的字段，返回空字符串
+	if len(c.builders) == 0 {
+		return ""
+	}
+	
+	// 收集所有有效的字段定义
+	var validFields []string
+	for _, builder := range c.builders {
+		s := builder.Build()
+		// 跳过空的字段定义
+		if s != "" {
+			validFields = append(validFields, s)
+		}
+	}
+	
+	// 如果没有有效字段，返回空字符串
+	if len(validFields) == 0 {
+		return ""
+	}
+	
+	// 构建ALTER TABLE语句
 	var res string
 	res = fmt.Sprintf("ALTER TABLE %s.%s \n", c.dbName, c.tableName)
-	for i := 0; i < len(c.builders); i++ {
-		s := c.builders[i].Build()
-		if i != len(c.builders)-1 {
-			s = fmt.Sprintf("%s, \n", s)
+	
+	// 添加字段定义，用逗号分隔
+	for i, field := range validFields {
+		if i == len(validFields)-1 {
+			// 最后一个字段，以分号结尾
+			res += fmt.Sprintf("%s;\n", field)
 		} else {
-			s = fmt.Sprintf("%s; \n", s)
+			// 非最后一个字段，以逗号结尾
+			res += fmt.Sprintf("%s,\n", field)
 		}
-		res = fmt.Sprintf("%s%s", res, s)
 	}
-	// 最后加一行换行，防止执行时漏了确认的换行回车
-	res = fmt.Sprintf("%s \n", res)
+	
 	return res
 }

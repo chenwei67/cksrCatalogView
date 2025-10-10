@@ -115,6 +115,15 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 		return fmt.Errorf("导出StarRocks表结构失败: %w", err)
 	}
 
+	// 2.4 为所有StarRocks表添加syncFromCK字段
+	fmt.Println("正在为StarRocks表添加syncFromCK字段...")
+	err = dbPairManager.AddSyncFromCKColumnToAllTables()
+	if err != nil {
+		return fmt.Errorf("为StarRocks表添加syncFromCK字段失败: %v", err)
+	}
+
+	fmt.Println("syncFromCK字段添加完成")
+
 	// 保存StarRocks表结构
 	if err := fileManager.WriteStarRocksSchemas(srSchemaMap, pairName); err != nil {
 		return fmt.Errorf("写入StarRocks表结构失败: %w", err)
@@ -245,6 +254,10 @@ func parseTableFromString(ddl string, dbName string, tableName string) (parser.T
 	fmt.Printf("    - 开始解析DDL，长度: %d 字符\n", len(ddl))
 	fmt.Printf("    - DDL前100字符: %s...\n", ddl[:min(100, len(ddl))])
 	
+	// 输出完整DDL内容用于分析
+	fmt.Printf("    - 完整DDL内容:\n%s\n", ddl)
+	fmt.Printf("    - DDL内容结束\n")
+	
 	// 使用超时机制防止解析阻塞
 	done := make(chan parser.Table, 1)
 	go func() {
@@ -258,8 +271,12 @@ func parseTableFromString(ddl string, dbName string, tableName string) (parser.T
 	case table := <-done:
 		fmt.Printf("    - DDL解析成功\n")
 		// 强制设置正确的数据库名和表名，避免依赖DDL中的解析结果
+		if dbName != ""{
 		table.DDL.DBName = dbName
-		table.DDL.TableName = tableName
+		}
+		if tableName != ""{
+			table.DDL.TableName = tableName
+		}
 		fmt.Printf("    - 设置数据库名: %s, 表名: %s\n", dbName, tableName)
 		return table, nil
 	case <-time.After(60 * time.Second):

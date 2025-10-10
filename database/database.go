@@ -297,3 +297,82 @@ func (dm *DatabasePairManager) GetPairName() string {
 func (dm *DatabasePairManager) GetPairIndex() int {
 	return dm.pairIndex
 }
+
+// CheckStarRocksColumnExists 检查StarRocks表中指定字段是否存在
+func (dm *DatabasePairManager) CheckStarRocksColumnExists(tableName, columnName string) (bool, error) {
+	db, err := dm.GetStarRocksConnection()
+	if err != nil {
+		return false, err
+	}
+	defer db.Close()
+
+	pair := dm.config.DatabasePairs[dm.pairIndex]
+
+	// 使用information_schema查询字段是否存在
+	query := `
+		SELECT COUNT(*) 
+		FROM information_schema.columns 
+		WHERE table_schema = ? 
+		AND table_name = ? 
+		AND column_name = ?
+	`
+
+	var count int
+	err = db.QueryRow(query, pair.StarRocks.Database, tableName, columnName).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("检查字段 %s.%s.%s 是否存在失败: %w", 
+			pair.StarRocks.Database, tableName, columnName, err)
+	}
+
+	return count > 0, nil
+}
+
+// AddSyncFromCKColumnToTable 为指定表添加syncFromCK字段（如果不存在）
+func (dm *DatabasePairManager) AddSyncFromCKColumnToTable(tableName string) error {
+	// 检查字段是否已存在
+	exists, err := dm.CheckStarRocksColumnExists(tableName, "syncFromCK")
+	if err != nil {
+		return fmt.Errorf("检查syncFromCK字段是否存在失败: %w", err)
+	}
+
+	if exists {
+		fmt.Printf("    - 表 %s 的 syncFromCK 字段已存在，跳过添加\n", tableName)
+		return nil
+	}
+
+	pair := dm.config.DatabasePairs[dm.pairIndex]
+	
+	// 构建添加字段的SQL
+	addColumnSQL := fmt.Sprintf(
+		"ALTER TABLE `%s`.`%s` ADD COLUMN `syncFromCK` BOOLEAN DEFAULT FALSE COMMENT '标识数据是否来自ClickHouse同步'",
+		pair.StarRocks.Database, tableName)
+
+	fmt.Printf("    - 正在为表 %s 添加 syncFromCK 字段...\n", tableName)
+	
+	if err := dm.ExecuteStarRocksSQL(addColumnSQL); err != nil {
+		return fmt.Errorf("为表 %s 添加 syncFromCK 字段失败: %w", tableName, err)
+	}
+
+	fmt.Printf("    - 表 %s 的 syncFromCK 字段添加成功\n", tableName)
+	return nil
+}
+
+// AddSyncFromCKColumnToAllTables 为所有StarRocks表添加syncFromCK字段
+func (dm *DatabasePairManager) AddSyncFromCKColumnToAllTables() error {
+	tableNames, err := dm.GetStarRocksTableNames()
+	if err != nil {
+		return fmt.Errorf("获取StarRocks表名列表失败: %w", err)
+	}
+
+	fmt.Printf("正在为 %d 个StarRocks表添加syncFromCK字段...\n", len(tableNames))
+	
+	for i, tableName := range tableNames {
+		fmt.Printf("[%d/%d] 处理表: %s\n", i+1, len(tableNames), tableName)
+		
+		if err := dm.AddSyncFromCKColumnToTable(tableName); err != nil {
+			return fmt.Errorf("为表 %s 添加syncFromCK字段失败: %w", tableName, err)
+		}
+	}
+
+	return nil
+}
