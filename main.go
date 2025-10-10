@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"cksr/builder"
@@ -14,11 +15,28 @@ import (
 )
 
 func main() {
+	var configPath string
+	
+	// 如果没有提供配置文件参数，使用默认的config.example.json
 	if len(os.Args) < 2 {
-		log.Fatal("请提供配置文件路径")
+		// 获取程序当前目录
+		execPath, err := os.Executable()
+		if err != nil {
+			log.Fatalf("获取程序路径失败: %v", err)
+		}
+		execDir := filepath.Dir(execPath)
+		configPath = filepath.Join(execDir, "config.example.json")
+		
+		// 检查默认配置文件是否存在
+		if _, err := os.Stat(configPath); os.IsNotExist(err) {
+			log.Fatalf("未提供配置文件参数，且默认配置文件 %s 不存在", configPath)
+		}
+		
+		log.Printf("使用默认配置文件: %s", configPath)
+	} else {
+		configPath = os.Args[1]
 	}
 
-	configPath := os.Args[1]
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
