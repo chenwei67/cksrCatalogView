@@ -48,28 +48,56 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 
 	// 1. 导出ClickHouse表结构
 	fmt.Println("正在导出ClickHouse表结构...")
-	ckSchemas, err := dbPairManager.ExportClickHouseTables()
+	ckSchema, err := dbPairManager.ExportClickHouseTables()
 	if err != nil {
 		return fmt.Errorf("导出ClickHouse表结构失败: %w", err)
 	}
 
 	// 2. 导出StarRocks表结构
 	fmt.Println("正在导出StarRocks表结构...")
-	srSchemas, err := dbPairManager.ExportStarRocksTables()
+	
+	// 2.1 先获取表名列表
+	srTableNames, err := dbPairManager.GetStarRocksTableNames()
+	if err != nil {
+		return fmt.Errorf("获取StarRocks表名列表失败: %w", err)
+	}
+
+	// 2.2 如果配置了表后缀，先执行重命名
+	var renameSQLs []string
+	if suffix := pair.SRTableSuffix; suffix != "" {
+		fmt.Printf("正在为StarRocks表添加后缀 '%s'...\n", suffix)
+		for _, tableName := range srTableNames {
+			if !strings.HasSuffix(tableName, suffix) {
+				newTableName := tableName + suffix
+				renameSQL := fmt.Sprintf("RENAME TABLE `%s`.`%s` TO `%s`.`%s`", 
+					pair.StarRocks.Database, tableName, 
+					pair.StarRocks.Database, newTableName)
+				renameSQLs = append(renameSQLs, renameSQL)
+			}
+		}
+		
+		// 执行重命名
+		if len(renameSQLs) > 0 {
+			fmt.Println("正在执行SR表重命名语句...")
+			if err := dbPairManager.ExecuteBatchSQL(renameSQLs, false); err != nil {
+				return fmt.Errorf("执行SR表重命名语句失败: %w", err)
+			}
+		}
+	}
+
+	// 2.3 重命名后再导出DDL
+	srSchema, err := dbPairManager.ExportStarRocksTables()
 	if err != nil {
 		return fmt.Errorf("导出StarRocks表结构失败: %w", err)
 	}
 
-	// 3. 写入文件
-	if err := fileManager.WriteClickHouseSchemas(parseSchemaString(ckSchemas), fmt.Sprintf("%s_%s", pair.ClickHouse.Database, pairName)); err != nil {
-		return fmt.Errorf("写入ClickHouse表结构失败: %w", err)
-	}
-
-	if err := fileManager.WriteStarRocksSchemas(parseSchemaString(srSchemas), fmt.Sprintf("%s_%s", pair.StarRocks.Database, pairName)); err != nil {
+	// 保存StarRocks表结构
+	srSchemaMap := parseSchemaString(srSchema)
+	if err := fileManager.WriteStarRocksSchemas(srSchemaMap, pairName); err != nil {
 		return fmt.Errorf("写入StarRocks表结构失败: %w", err)
 	}
 
-	// 4. 创建StarRocks Catalog（使用配置中指定的catalog名称）
+	// 3. 创建StarRocks Catalog（使用配置中指定的catalog名称）
 	fmt.Println("正在创建StarRocks Catalog...")
 	catalogName := pair.CatalogName
 	if catalogName == "" {
@@ -80,33 +108,35 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 		return fmt.Errorf("创建StarRocks Catalog失败: %w", err)
 	}
 
-	// 5. 处理共同的表
-	ckSchemaMap := parseSchemaString(ckSchemas)
-	srSchemaMap := parseSchemaString(srSchemas)
-	commonTables := fileManager.ListCommonTables(ckSchemaMap, srSchemaMap)
-	fmt.Printf("找到%d个共同的表: %v\n", len(commonTables), commonTables)
+	// 6. 处理共同的表
+	// 获取重命名后的StarRocks表名列表
+	finalSrTableNames, err := dbPairManager.GetStarRocksTableNames()
+	if err != nil {
+		return fmt.Errorf("获取重命名后的StarRocks表名列表失败: %w", err)
+	}
 
-	// 5.1 在SR侧统一追加表后缀（若已包含则跳过），并生成重命名SQL
+	// 构建StarRocks表名映射（重命名后的表名 -> 原始表名）
+	srTableMap := make(map[string]string)
 	suffix := strings.TrimSpace(pair.SRTableSuffix)
-	var renameSQLs []string
-	if suffix != "" {
-		for _, tableName := range commonTables {
-			// 如果表名已经以后缀结尾，则跳过重命名
-			if strings.HasSuffix(tableName, suffix) {
-				continue
-			}
-			newName := tableName + suffix
-			renameSQL := fmt.Sprintf("RENAME TABLE `%s`.`%s` TO `%s`.`%s`", pair.StarRocks.Database, tableName, pair.StarRocks.Database, newName)
-			renameSQLs = append(renameSQLs, renameSQL)
-			// 更新srSchemaMap键，以便后续解析和视图生成使用新表名
-			if ddl, ok := srSchemaMap[tableName]; ok {
-				delete(srSchemaMap, tableName)
-				// 粗略替换DDL中的表名（仅用于解析），实际以SHOW CREATE原始DDL为准
-				ddl = strings.ReplaceAll(ddl, fmt.Sprintf("%s.%s", pair.StarRocks.Database, tableName), fmt.Sprintf("%s.%s", pair.StarRocks.Database, newName))
-				srSchemaMap[newName] = ddl
-			}
+	for _, finalTableName := range finalSrTableNames {
+		originalTableName := finalTableName
+		if suffix != "" && strings.HasSuffix(finalTableName, suffix) {
+			originalTableName = strings.TrimSuffix(finalTableName, suffix)
+		}
+		srTableMap[originalTableName] = finalTableName
+	}
+
+	ckSchemaMap := parseSchemaString(ckSchema)
+	commonTables := []string{}
+	
+	// 找出共同的表（基于原始表名）
+	for originalTableName := range ckSchemaMap {
+		if _, exists := srTableMap[originalTableName]; exists {
+			commonTables = append(commonTables, originalTableName)
 		}
 	}
+	
+	fmt.Printf("找到%d个共同的表: %v\n", len(commonTables), commonTables)
 
 	var alterSQLs []string
 	var viewSQLs []string
@@ -115,27 +145,23 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 		fmt.Printf("正在处理表: %s\n", tableName)
 
 		// 解析ClickHouse表结构
-		ckTable, err := parseTableFromString(ckSchemaMap[tableName])
+		ckTable, err := parseTableFromString(ckSchemaMap[tableName], pair.ClickHouse.Database, tableName)
 		if err != nil {
 			return fmt.Errorf("解析ClickHouse表%s失败: %w", tableName, err)
 		}
 
-		// 解析StarRocks表结构（考虑可能已重命名的新表名）
-		srLookupName := tableName
-		if suffix != "" && !strings.HasSuffix(tableName, suffix) {
-			srLookupName = tableName + suffix
-		}
-		srDDL, ok := srSchemaMap[srLookupName]
-		if !ok {
-			return fmt.Errorf("未找到StarRocks表%s的DDL（考虑后缀%s）", srLookupName, suffix)
-		}
-		srTable, err := parseTableFromString(srDDL)
+		// 解析StarRocks表结构（直接获取DDL）
+		srTableName := srTableMap[tableName] // 获取重命名后的实际表名
+		srDDL, err := dbPairManager.GetStarRocksTableDDL(srTableName)
 		if err != nil {
-			return fmt.Errorf("解析StarRocks表%s失败: %w", srLookupName, err)
+			return fmt.Errorf("获取StarRocks表%s的DDL失败: %w", srTableName, err)
 		}
-		// 强制覆盖解析得到的SR表名，确保视图生成使用重命名后的新表名
-		srTable.DDL.DBName = pair.StarRocks.Database
-		srTable.DDL.TableName = srLookupName
+		
+		// 直接构造StarRocks表结构，避免依赖parseSchemaString的解析
+		srTable, err := parseTableFromString(srDDL, pair.StarRocks.Database, srTableName)
+		if err != nil {
+			return fmt.Errorf("解析StarRocks表%s失败: %w", srTableName, err)
+		}
 
 		// 过滤掉通过add column操作新增的字段，确保后续流程的健壮性
 		ckTable = filterAddedColumns(ckTable)
@@ -156,15 +182,7 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 		viewSQLs = append(viewSQLs, viewSQL)
 	}
 
-	// 6. 先执行SR表重命名，再执行ALTER和VIEW语句
-	if len(renameSQLs) > 0 {
-		fmt.Println("正在执行SR表重命名语句...")
-		if err := dbPairManager.ExecuteBatchSQL(renameSQLs, false); err != nil {
-			return fmt.Errorf("执行SR表重命名语句失败: %w", err)
-		}
-	}
-
-	// 6.1 执行ALTER TABLE语句
+	// 7. 执行ALTER TABLE和CREATE VIEW语句
 	fmt.Println("正在执行ALTER TABLE语句...")
 	if err := dbPairManager.ExecuteBatchSQL(alterSQLs, true); err != nil {
 		return fmt.Errorf("执行ALTER TABLE语句失败: %w", err)
@@ -222,9 +240,15 @@ func filterAddedColumns(table parser.Table) parser.Table {
 	return table
 }
 
-// parseTableFromString 从DDL字符串解析表结构
-func parseTableFromString(ddl string) (parser.Table, error) {
-	return parser.ParserTableSQL(ddl), nil
+// parseTableFromString 从DDL字符串解析表结构，并设置正确的数据库名和表名
+func parseTableFromString(ddl string, dbName string, tableName string) (parser.Table, error) {
+	table := parser.ParserTableSQL(ddl)
+	
+	// 强制设置正确的数据库名和表名，避免依赖DDL中的解析结果
+	table.DDL.DBName = dbName
+	table.DDL.TableName = tableName
+	
+	return table, nil
 }
 
 func getParseTable(sqlPath string) (parser.Table, error) {

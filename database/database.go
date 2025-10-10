@@ -53,17 +53,17 @@ func (dm *DatabasePairManager) GetClickHouseConnection() (*sql.DB, error) {
 	if dsn == "" {
 		return nil, fmt.Errorf("无效的数据库对索引: %d", dm.pairIndex)
 	}
-	
+
 	db, err := sql.Open("clickhouse", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("连接ClickHouse失败: %w", err)
 	}
-	
+
 	if err := db.Ping(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("ClickHouse连接测试失败: %w", err)
 	}
-	
+
 	return db, nil
 }
 
@@ -73,17 +73,17 @@ func (dm *DatabasePairManager) GetStarRocksConnection() (*sql.DB, error) {
 	if dsn == "" {
 		return nil, fmt.Errorf("无效的数据库对索引: %d", dm.pairIndex)
 	}
-	
+
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("连接StarRocks失败: %w", err)
 	}
-	
+
 	if err := db.Ping(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("StarRocks连接测试失败: %w", err)
 	}
-	
+
 	return db, nil
 }
 
@@ -123,8 +123,36 @@ func (dm *DatabasePairManager) ExportClickHouseTables() (string, error) {
 	return result.String(), nil
 }
 
-// ExportStarRocksTables 导出StarRocks表结构
-func (dm *DatabasePairManager) ExportStarRocksTables() (string, error) {
+// GetStarRocksTableNames 获取StarRocks表名列表
+func (dm *DatabasePairManager) GetStarRocksTableNames() ([]string, error) {
+	db, err := dm.GetStarRocksConnection()
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	pair := dm.config.DatabasePairs[dm.pairIndex]
+
+	rows, err := db.Query(fmt.Sprintf("SHOW TABLES FROM %s", pair.StarRocks.Database))
+	if err != nil {
+		return nil, fmt.Errorf("获取表列表失败: %w", err)
+	}
+	defer rows.Close()
+
+	var tableNames []string
+	for rows.Next() {
+		var tableName string
+		if err := rows.Scan(&tableName); err != nil {
+			continue
+		}
+		tableNames = append(tableNames, tableName)
+	}
+
+	return tableNames, nil
+}
+
+// GetStarRocksTableDDL 获取指定表的DDL语句
+func (dm *DatabasePairManager) GetStarRocksTableDDL(tableName string) (string, error) {
 	db, err := dm.GetStarRocksConnection()
 	if err != nil {
 		return "", err
@@ -132,35 +160,41 @@ func (dm *DatabasePairManager) ExportStarRocksTables() (string, error) {
 	defer db.Close()
 
 	pair := dm.config.DatabasePairs[dm.pairIndex]
-	
-	rows, err := db.Query(fmt.Sprintf("SHOW TABLES FROM %s", pair.StarRocks.Database))
+
+	createQuery := fmt.Sprintf("SHOW CREATE TABLE %s.%s", pair.StarRocks.Database, tableName)
+	rows, err := db.Query(createQuery)
 	if err != nil {
-		return "", fmt.Errorf("获取表列表失败: %w", err)
+		return "", fmt.Errorf("获取表 %s 的创建语句失败: %w", tableName, err)
 	}
 	defer rows.Close()
 
+	if rows.Next() {
+		var table, createStatement string
+		if err := rows.Scan(&table, &createStatement); err != nil {
+			return "", fmt.Errorf("扫描表 %s 的创建语句失败: %w", tableName, err)
+		}
+		return createStatement, nil
+	}
+
+	return "", fmt.Errorf("未找到表 %s 的创建语句", tableName)
+}
+
+// ExportStarRocksTables 导出StarRocks表结构（保持向后兼容）
+func (dm *DatabasePairManager) ExportStarRocksTables() (string, error) {
+	tableNames, err := dm.GetStarRocksTableNames()
+	if err != nil {
+		return "", err
+	}
+
 	var result strings.Builder
-	for rows.Next() {
-		var tableName string
-		if err := rows.Scan(&tableName); err != nil {
-			continue
-		}
-
-		createQuery := fmt.Sprintf("SHOW CREATE TABLE %s.%s", pair.StarRocks.Database, tableName)
-		rows2, err := db.Query(createQuery)
+	for _, tableName := range tableNames {
+		ddl, err := dm.GetStarRocksTableDDL(tableName)
 		if err != nil {
-			log.Printf("获取表 %s 的创建语句失败: %v", tableName, err)
+			log.Printf("获取表 %s 的DDL失败: %v", tableName, err)
 			continue
 		}
-
-		if rows2.Next() {
-			var table, createStatement string
-			if err := rows2.Scan(&table, &createStatement); err == nil {
-				result.WriteString(createStatement)
-				result.WriteString(";\n\n")
-			}
-		}
-		rows2.Close()
+		result.WriteString(ddl)
+		result.WriteString(";\n\n")
 	}
 
 	return result.String(), nil
@@ -196,9 +230,9 @@ func (dm *DatabasePairManager) CreateStarRocksCatalog(catalogName string) error 
 	if jdbcURI == "" {
 		return fmt.Errorf("无效的数据库对索引: %d", dm.pairIndex)
 	}
-	
+
 	pair := dm.config.DatabasePairs[dm.pairIndex]
-	
+
 	createCatalogSQL := fmt.Sprintf(`
 		CREATE EXTERNAL CATALOG IF NOT EXISTS %s
 		PROPERTIES (
