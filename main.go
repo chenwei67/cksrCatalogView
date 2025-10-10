@@ -87,9 +87,9 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 		for _, tableName := range srTableNames {
 			if !strings.HasSuffix(tableName, suffix) {
 				newTableName := tableName + suffix
-				renameSQL := fmt.Sprintf("RENAME TABLE `%s`.`%s` TO `%s`.`%s`", 
-					pair.StarRocks.Database, tableName, 
-					pair.StarRocks.Database, newTableName)
+				// 使用StarRocks支持的ALTER TABLE RENAME语法
+				renameSQL := fmt.Sprintf("ALTER TABLE `%s`.`%s` RENAME `%s`", 
+					pair.StarRocks.Database, tableName, newTableName)
 				renameSQLs = append(renameSQLs, renameSQL)
 			}
 		}

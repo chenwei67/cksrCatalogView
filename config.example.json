@@ -6,7 +6,7 @@
       "sr_table_suffix": "_local_catalog",
       "clickhouse": {
         "host": "10.117.64.15",
-        "port": 31003,
+        "port": 31004,
         "username": "root",
         "password": "QmDunBxpfMpFbydK9P2y",
         "database": "business"
