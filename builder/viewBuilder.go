@@ -201,12 +201,19 @@ func (v *ViewBuilder) Build() (string, error) {
 }
 
 func (v *ViewBuilder) GenViewSQL(ckQ, srQ string) string {
-	return fmt.Sprintf("create view %s.%s as \n%s \nunion all \n%s; \n", v.dbName, v.viewName, ckQ, srQ)
+	return fmt.Sprintf("create view if not exists %s.%s as \n%s \nunion all \n%s; \n", v.dbName, v.viewName, ckQ, srQ)
+}
+
+// GenViewSQLWithIfNotExists 生成带IF NOT EXISTS的CREATE VIEW语句
+// 这个方法与GenViewSQL功能相同，但提供了更明确的语义
+func (v *ViewBuilder) GenViewSQLWithIfNotExists(ckQ, srQ string) string {
+	return v.GenViewSQL(ckQ, srQ)
 }
 
 // 是rowLogAlias
 func (f *CKField) Ignore() bool {
-	return strings.ToLower(f.originName()) == "rowlogalias"
+	n := strings.ToLower(f.originName())
+	return n == "rowlogalias" || n == "_invert_text"
 }
 
 // 构建clause

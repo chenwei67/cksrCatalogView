@@ -327,6 +327,97 @@ func (dm *DatabasePairManager) CheckStarRocksColumnExists(tableName, columnName 
 	return count > 0, nil
 }
 
+// CheckStarRocksTableIsNative 检查StarRocks表是否为native表
+func (dm *DatabasePairManager) CheckStarRocksTableIsNative(tableName string) (bool, error) {
+	db, err := dm.GetStarRocksConnection()
+	if err != nil {
+		return false, err
+	}
+	defer db.Close()
+
+	pair := dm.config.DatabasePairs[dm.pairIndex]
+
+	// 使用information_schema.tables查询表类型
+	query := `
+		SELECT table_type 
+		FROM information_schema.tables 
+		WHERE table_schema = ? 
+		AND table_name = ?
+	`
+
+	var tableType string
+	err = db.QueryRow(query, pair.StarRocks.Database, tableName).Scan(&tableType)
+	if err != nil {
+		return false, fmt.Errorf("检查表 %s.%s 类型失败: %w", 
+			pair.StarRocks.Database, tableName, err)
+	}
+
+	// 检查是否为BASE TABLE（native表）
+	// StarRocks中native表的table_type为'BASE TABLE'
+	// 非native表（如外部表、物化视图等）会有不同的table_type
+	// VIEW类型的表也不是native表
+	tableTypeUpper := strings.ToUpper(tableType)
+	return tableTypeUpper == "BASE TABLE", nil
+}
+
+// CheckStarRocksTableIsView 检查StarRocks表是否为VIEW
+func (dm *DatabasePairManager) CheckStarRocksTableIsView(tableName string) (bool, error) {
+	db, err := dm.GetStarRocksConnection()
+	if err != nil {
+		return false, err
+	}
+	defer db.Close()
+
+	pair := dm.config.DatabasePairs[dm.pairIndex]
+
+	// 使用information_schema.tables查询表类型
+	query := `
+		SELECT table_type 
+		FROM information_schema.tables 
+		WHERE table_schema = ? 
+		AND table_name = ?
+	`
+
+	var tableType string
+	err = db.QueryRow(query, pair.StarRocks.Database, tableName).Scan(&tableType)
+	if err != nil {
+		return false, fmt.Errorf("检查表 %s.%s 类型失败: %w", 
+			pair.StarRocks.Database, tableName, err)
+	}
+
+	// 检查是否为VIEW
+	return strings.ToUpper(tableType) == "VIEW", nil
+}
+
+
+// CheckClickHouseColumnExists 检查ClickHouse表中指定字段是否存在
+func (dm *DatabasePairManager) CheckClickHouseColumnExists(tableName, columnName string) (bool, error) {
+	db, err := dm.GetClickHouseConnection()
+	if err != nil {
+		return false, err
+	}
+	defer db.Close()
+
+	pair := dm.config.DatabasePairs[dm.pairIndex]
+
+	// 使用system.columns查询字段是否存在
+	query := `
+		SELECT COUNT(*)
+		FROM system.columns
+		WHERE database = ?
+		AND table = ?
+		AND name = ?
+	`
+
+	var count int
+	err = db.QueryRow(query, pair.ClickHouse.Database, tableName, columnName).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("检查ClickHouse字段 %s.%s.%s 是否存在失败: %w",
+			pair.ClickHouse.Database, tableName, columnName, err)
+	}
+
+	return count > 0, nil
+}
 // AddSyncFromCKColumnToTable 为指定表添加syncFromCK字段（如果不存在）
 func (dm *DatabasePairManager) AddSyncFromCKColumnToTable(tableName string) error {
 	// 检查字段是否已存在
@@ -344,7 +435,7 @@ func (dm *DatabasePairManager) AddSyncFromCKColumnToTable(tableName string) erro
 	
 	// 构建添加字段的SQL
 	addColumnSQL := fmt.Sprintf(
-		"ALTER TABLE `%s`.`%s` ADD COLUMN `syncFromCK` BOOLEAN DEFAULT FALSE COMMENT '标识数据是否来自ClickHouse同步'",
+		"ALTER TABLE `%s`.`%s` ADD COLUMN `syncFromCK` BOOLEAN DEFAULT \"FALSE\" COMMENT '标识数据是否来自ClickHouse同步'",
 		pair.StarRocks.Database, tableName)
 
 	fmt.Printf("    - 正在为表 %s 添加 syncFromCK 字段...\n", tableName)
@@ -368,6 +459,18 @@ func (dm *DatabasePairManager) AddSyncFromCKColumnToAllTables() error {
 	
 	for i, tableName := range tableNames {
 		fmt.Printf("[%d/%d] 处理表: %s\n", i+1, len(tableNames), tableName)
+		
+		// 检查表是否为VIEW
+		isView, err := dm.CheckStarRocksTableIsView(tableName)
+		if err != nil {
+			fmt.Printf("警告: 检查表 %s 类型失败: %v，跳过添加syncFromCK字段\n", tableName, err)
+			continue
+		}
+		
+		if isView {
+			fmt.Printf("    - 跳过VIEW表: %s (VIEW表不需要添加syncFromCK字段)\n", tableName)
+			continue
+		}
 		
 		if err := dm.AddSyncFromCKColumnToTable(tableName); err != nil {
 			return fmt.Errorf("为表 %s 添加syncFromCK字段失败: %w", tableName, err)

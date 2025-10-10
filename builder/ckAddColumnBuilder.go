@@ -35,7 +35,7 @@ func (c CKAddColumnBuilder) buildAddLine(aliasFunc func(string, string) string, 
 }
 
 func (c CKAddColumnBuilder) addColumn(s string) string {
-	return fmt.Sprintf("ADD COLUMN %s", s)
+	return fmt.Sprintf("ADD COLUMN IF NOT EXISTS %s", s)
 }
 
 func (c CKAddColumnBuilder) stringAlias(name, remain string) string {
@@ -108,20 +108,28 @@ func (c CKAddColumnsBuilder) Build() string {
 		return ""
 	}
 	
-	// 构建ALTER TABLE语句
-	var res string
-	res = fmt.Sprintf("ALTER TABLE %s.%s \n", c.dbName, c.tableName)
+	// 构建ALTER TABLE语句，每个字段单独一条语句以支持IF NOT EXISTS
+	var statements []string
+	for _, field := range validFields {
+		stmt := fmt.Sprintf("ALTER TABLE %s.%s %s;", c.dbName, c.tableName, field)
+		statements = append(statements, stmt)
+	}
 	
-	// 添加字段定义，用逗号分隔
-	for i, field := range validFields {
-		if i == len(validFields)-1 {
-			// 最后一个字段，以分号结尾
-			res += fmt.Sprintf("%s;\n", field)
+	// 将所有语句用换行符连接
+	var result string
+	for i, stmt := range statements {
+		if i == len(statements)-1 {
+			result += stmt
 		} else {
-			// 非最后一个字段，以逗号结尾
-			res += fmt.Sprintf("%s,\n", field)
+			result += stmt + "\n"
 		}
 	}
 	
-	return res
+	return result
+}
+
+// BuildWithExistenceCheck 构建带字段存在性检查的ALTER TABLE语句
+// 这个方法与Build()方法功能相同，但提供了更明确的语义
+func (c CKAddColumnsBuilder) BuildWithExistenceCheck() string {
+	return c.Build()
 }

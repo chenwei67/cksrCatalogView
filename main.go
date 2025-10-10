@@ -92,6 +92,30 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 		fmt.Printf("正在为StarRocks表添加后缀 '%s'...\n", suffix)
 		for _, tableName := range srTableNames {
 			if !strings.HasSuffix(tableName, suffix) {
+				// 检查表是否为VIEW
+				isView, err := dbPairManager.CheckStarRocksTableIsView(tableName)
+				if err != nil {
+					fmt.Printf("警告: 检查表 %s 类型失败: %v，跳过重命名\n", tableName, err)
+					continue
+				}
+				
+				if isView {
+					fmt.Printf("跳过VIEW表: %s (VIEW表不需要重命名)\n", tableName)
+					continue
+				}
+				
+				// 检查表是否为native表
+				isNative, err := dbPairManager.CheckStarRocksTableIsNative(tableName)
+				if err != nil {
+					fmt.Printf("警告: 检查表 %s 类型失败: %v，跳过重命名\n", tableName, err)
+					continue
+				}
+				
+				if !isNative {
+					fmt.Printf("跳过非native表: %s (不支持ALTER TABLE RENAME操作)\n", tableName)
+					continue
+				}
+				
 				newTableName := tableName + suffix
 				// 使用StarRocks支持的ALTER TABLE RENAME语法
 				renameSQL := fmt.Sprintf("ALTER TABLE `%s`.`%s` RENAME `%s`", 
@@ -176,6 +200,19 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 	for i, tableName := range commonTables {
 		fmt.Printf("\n[%d/%d] 正在处理表: %s\n", i+1, len(commonTables), tableName)
 
+		// 检查StarRocks表是否为VIEW
+		srTableName := srTableMap[tableName] // 获取重命名后的实际表名
+		isView, err := dbPairManager.CheckStarRocksTableIsView(srTableName)
+		if err != nil {
+			fmt.Printf("警告: 检查表 %s 类型失败: %v，跳过处理\n", srTableName, err)
+			continue
+		}
+		
+		if isView {
+			fmt.Printf("  - 跳过VIEW表: %s (VIEW表不需要处理ALTER TABLE和CREATE VIEW操作)\n", srTableName)
+			continue
+		}
+
 		// 解析ClickHouse表结构
 		fmt.Printf("  - 正在解析ClickHouse表结构...\n")
 		ckTable, err := parseTableFromString(ckSchemaMap[tableName], pair.ClickHouse.Database, tableName)
@@ -185,7 +222,6 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 		fmt.Printf("  - ClickHouse表结构解析完成\n")
 
 		// 解析StarRocks表结构（直接获取DDL）
-		srTableName := srTableMap[tableName] // 获取重命名后的实际表名
 		fmt.Printf("  - 正在获取StarRocks表DDL (表名: %s)...\n", srTableName)
 		srDDL, err := dbPairManager.GetStarRocksTableDDL(srTableName)
 		if err != nil {
