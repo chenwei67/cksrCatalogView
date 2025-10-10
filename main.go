@@ -66,9 +66,14 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 
 	// 1. 导出ClickHouse表结构
 	fmt.Println("正在导出ClickHouse表结构...")
-	ckSchema, err := dbPairManager.ExportClickHouseTables()
+	ckSchemaMap, err := dbPairManager.ExportClickHouseTables()
 	if err != nil {
 		return fmt.Errorf("导出ClickHouse表结构失败: %w", err)
+	}
+
+	// 保存ClickHouse表结构
+	if err := fileManager.WriteClickHouseSchemas(ckSchemaMap, pairName); err != nil {
+		return fmt.Errorf("写入ClickHouse表结构失败: %w", err)
 	}
 
 	// 2. 导出StarRocks表结构
@@ -104,13 +109,12 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 	}
 
 	// 2.3 重命名后再导出DDL
-	srSchema, err := dbPairManager.ExportStarRocksTables()
+	srSchemaMap, err := dbPairManager.ExportStarRocksTables()
 	if err != nil {
 		return fmt.Errorf("导出StarRocks表结构失败: %w", err)
 	}
 
 	// 保存StarRocks表结构
-	srSchemaMap := parseSchemaString(srSchema)
 	if err := fileManager.WriteStarRocksSchemas(srSchemaMap, pairName); err != nil {
 		return fmt.Errorf("写入StarRocks表结构失败: %w", err)
 	}
@@ -144,7 +148,6 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 		srTableMap[originalTableName] = finalTableName
 	}
 
-	ckSchemaMap := parseSchemaString(ckSchema)
 	commonTables := []string{}
 	
 	// 找出共同的表（基于原始表名）
@@ -215,41 +218,7 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 	return nil
 }
 
-// parseSchemaString 将字符串格式的schema转换为map格式
-func parseSchemaString(schemaStr string) map[string]string {
-	result := make(map[string]string)
-	statements := strings.Split(schemaStr, ";\n\n")
 
-	for _, statement := range statements {
-		statement = strings.TrimSpace(statement)
-		if statement == "" {
-			continue
-		}
-
-		// 简单的表名提取逻辑，可能需要根据实际情况调整
-		lines := strings.Split(statement, "\n")
-		if len(lines) > 0 {
-			firstLine := strings.TrimSpace(lines[0])
-			if strings.Contains(firstLine, "CREATE TABLE") {
-				// 提取表名
-				parts := strings.Fields(firstLine)
-				for i, part := range parts {
-					if strings.ToUpper(part) == "TABLE" && i+1 < len(parts) {
-						tableName := strings.Trim(parts[i+1], "`\"")
-						// 移除数据库前缀
-						if dotIndex := strings.LastIndex(tableName, "."); dotIndex != -1 {
-							tableName = tableName[dotIndex+1:]
-						}
-						result[tableName] = statement
-						break
-					}
-				}
-			}
-		}
-	}
-
-	return result
-}
 
 // filterAddedColumns 过滤掉通过add column操作新增的字段
 func filterAddedColumns(table parser.Table) parser.Table {

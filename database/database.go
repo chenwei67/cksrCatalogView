@@ -88,21 +88,21 @@ func (dm *DatabasePairManager) GetStarRocksConnection() (*sql.DB, error) {
 }
 
 // ExportClickHouseTables 导出ClickHouse表结构
-func (dm *DatabasePairManager) ExportClickHouseTables() (string, error) {
+func (dm *DatabasePairManager) ExportClickHouseTables() (map[string]string, error) {
 	db, err := dm.GetClickHouseConnection()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer db.Close()
 
 	query := "SHOW CREATE TABLE"
 	rows, err := db.Query("SHOW TABLES")
 	if err != nil {
-		return "", fmt.Errorf("获取表列表失败: %w", err)
+		return nil, fmt.Errorf("获取表列表失败: %w", err)
 	}
 	defer rows.Close()
 
-	var result strings.Builder
+	result := make(map[string]string)
 	for rows.Next() {
 		var tableName string
 		if err := rows.Scan(&tableName); err != nil {
@@ -116,11 +116,10 @@ func (dm *DatabasePairManager) ExportClickHouseTables() (string, error) {
 			continue
 		}
 
-		result.WriteString(createStatement)
-		result.WriteString(";\n\n")
+		result[tableName] = createStatement
 	}
 
-	return result.String(), nil
+	return result, nil
 }
 
 // GetStarRocksTableNames 获取StarRocks表名列表
@@ -179,25 +178,24 @@ func (dm *DatabasePairManager) GetStarRocksTableDDL(tableName string) (string, e
 	return "", fmt.Errorf("未找到表 %s 的创建语句", tableName)
 }
 
-// ExportStarRocksTables 导出StarRocks表结构（保持向后兼容）
-func (dm *DatabasePairManager) ExportStarRocksTables() (string, error) {
+// ExportStarRocksTables 导出StarRocks表结构
+func (dm *DatabasePairManager) ExportStarRocksTables() (map[string]string, error) {
 	tableNames, err := dm.GetStarRocksTableNames()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	var result strings.Builder
+	result := make(map[string]string)
 	for _, tableName := range tableNames {
 		ddl, err := dm.GetStarRocksTableDDL(tableName)
 		if err != nil {
 			log.Printf("获取表 %s 的DDL失败: %v", tableName, err)
 			continue
 		}
-		result.WriteString(ddl)
-		result.WriteString(";\n\n")
+		result[tableName] = ddl
 	}
 
-	return result.String(), nil
+	return result, nil
 }
 
 // ExecuteClickHouseSQL 执行ClickHouse SQL
