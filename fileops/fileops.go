@@ -57,6 +57,9 @@ func (fm *FileManager) WriteClickHouseSchemas(schemas map[string]string, dbName 
 
 // WriteStarRocksSchemas 将StarRocks表结构写入文件
 func (fm *FileManager) WriteStarRocksSchemas(schemas map[string]string, dbName string) error {
+	if len(schemas) == 0{
+		return nil
+	}
 	if err := fm.EnsureTempDir(); err != nil {
 		return err
 	}

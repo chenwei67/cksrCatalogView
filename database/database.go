@@ -9,14 +9,13 @@
 package database
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"log"
 	"strings"
-	"time"
 
 	"cksr/config"
+	"cksr/logger"
 
 	_ "github.com/ClickHouse/clickhouse-go"
 	_ "github.com/go-sql-driver/mysql"
@@ -154,40 +153,37 @@ func (dm *DatabasePairManager) GetStarRocksTableNames() ([]string, error) {
 
 // GetStarRocksTableDDL 获取指定表的DDL语句
 func (dm *DatabasePairManager) GetStarRocksTableDDL(tableName string) (string, error) {
-	fmt.Printf("    - 正在连接StarRocks数据库...\n")
+	logger.Debug("正在连接StarRocks数据库...")
 	db, err := dm.GetStarRocksConnection()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("连接StarRocks数据库失败: %w", err)
 	}
 	defer db.Close()
-	fmt.Printf("    - StarRocks数据库连接成功\n")
+	logger.Debug("StarRocks数据库连接成功")
 
-	pair := dm.config.DatabasePairs[dm.pairIndex]
+	// 构造查询语句
+	createQuery := fmt.Sprintf("SHOW CREATE TABLE `%s`.`%s`", dm.config.DatabasePairs[dm.pairIndex].StarRocks.Database, tableName)
+	logger.Debug("执行查询: %s", createQuery)
 
-	createQuery := fmt.Sprintf("SHOW CREATE TABLE %s.%s", pair.StarRocks.Database, tableName)
-	fmt.Printf("    - 执行查询: %s\n", createQuery)
-	
-	// 设置查询超时
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	
-	rows, err := db.QueryContext(ctx, createQuery)
+	// 执行查询
+	rows, err := db.Query(createQuery)
 	if err != nil {
-		return "", fmt.Errorf("获取表 %s 的创建语句失败: %w", tableName, err)
+		return "", fmt.Errorf("执行查询失败: %w", err)
 	}
 	defer rows.Close()
-	fmt.Printf("    - 查询执行完成，正在读取结果...\n")
 
+	logger.Debug("查询执行完成，正在读取结果...")
+	
+	// 读取结果
+	var table, createStatement string
 	if rows.Next() {
-		var table, createStatement string
 		if err := rows.Scan(&table, &createStatement); err != nil {
-			return "", fmt.Errorf("扫描表 %s 的创建语句失败: %w", tableName, err)
+			return "", fmt.Errorf("读取查询结果失败: %w", err)
 		}
-		fmt.Printf("    - DDL读取完成，长度: %d 字符\n", len(createStatement))
-		return createStatement, nil
 	}
+	logger.Debug("DDL读取完成，长度: %d 字符", len(createStatement))
 
-	return "", fmt.Errorf("未找到表 %s 的创建语句", tableName)
+	return createStatement, nil
 }
 
 // ExportStarRocksTables 导出StarRocks表结构
@@ -199,9 +195,21 @@ func (dm *DatabasePairManager) ExportStarRocksTables() (map[string]string, error
 
 	result := make(map[string]string)
 	for _, tableName := range tableNames {
+		// 检查表是否为VIEW
+		isView, err := dm.CheckStarRocksTableIsView(tableName)
+		if err != nil {
+			logger.Warn("检查表 %s 类型失败: %v，跳过该表", tableName, err)
+			continue
+		}
+		
+		if isView {
+			logger.Debug("跳过VIEW表: %s (VIEW表不需要导出DDL)", tableName)
+			continue
+		}
+		
 		ddl, err := dm.GetStarRocksTableDDL(tableName)
 		if err != nil {
-			log.Printf("获取表 %s 的DDL失败: %v", tableName, err)
+			logger.Error("获取表 %s 的DDL失败: %v", tableName, err)
 			continue
 		}
 		result[tableName] = ddl
@@ -427,7 +435,7 @@ func (dm *DatabasePairManager) AddSyncFromCKColumnToTable(tableName string) erro
 	}
 
 	if exists {
-		fmt.Printf("    - 表 %s 的 syncFromCK 字段已存在，跳过添加\n", tableName)
+		logger.Debug("表 %s 的 syncFromCK 字段已存在，跳过添加", tableName)
 		return nil
 	}
 
@@ -438,13 +446,13 @@ func (dm *DatabasePairManager) AddSyncFromCKColumnToTable(tableName string) erro
 		"ALTER TABLE `%s`.`%s` ADD COLUMN `syncFromCK` BOOLEAN DEFAULT \"FALSE\" COMMENT '标识数据是否来自ClickHouse同步'",
 		pair.StarRocks.Database, tableName)
 
-	fmt.Printf("    - 正在为表 %s 添加 syncFromCK 字段...\n", tableName)
+	logger.Debug("正在为表 %s 添加 syncFromCK 字段...", tableName)
 	
 	if err := dm.ExecuteStarRocksSQL(addColumnSQL); err != nil {
 		return fmt.Errorf("为表 %s 添加 syncFromCK 字段失败: %w", tableName, err)
 	}
 
-	fmt.Printf("    - 表 %s 的 syncFromCK 字段添加成功\n", tableName)
+	logger.Debug("表 %s 的 syncFromCK 字段添加成功", tableName)
 	return nil
 }
 
@@ -455,20 +463,20 @@ func (dm *DatabasePairManager) AddSyncFromCKColumnToAllTables() error {
 		return fmt.Errorf("获取StarRocks表名列表失败: %w", err)
 	}
 
-	fmt.Printf("正在为 %d 个StarRocks表添加syncFromCK字段...\n", len(tableNames))
+	logger.Info("正在为 %d 个StarRocks表添加syncFromCK字段...", len(tableNames))
 	
 	for i, tableName := range tableNames {
-		fmt.Printf("[%d/%d] 处理表: %s\n", i+1, len(tableNames), tableName)
+		logger.Debug("[%d/%d] 处理表: %s", i+1, len(tableNames), tableName)
 		
 		// 检查表是否为VIEW
 		isView, err := dm.CheckStarRocksTableIsView(tableName)
 		if err != nil {
-			fmt.Printf("警告: 检查表 %s 类型失败: %v，跳过添加syncFromCK字段\n", tableName, err)
+			logger.Warn("检查表 %s 类型失败: %v，跳过添加syncFromCK字段", tableName, err)
 			continue
 		}
 		
 		if isView {
-			fmt.Printf("    - 跳过VIEW表: %s (VIEW表不需要添加syncFromCK字段)\n", tableName)
+			logger.Debug("跳过VIEW表: %s (VIEW表不需要添加syncFromCK字段)", tableName)
 			continue
 		}
 		

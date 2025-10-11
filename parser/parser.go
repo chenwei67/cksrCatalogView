@@ -9,8 +9,8 @@
 package parser
 
 import (
-	"fmt"
 	"strings"
+	"cksr/logger"
 )
 
 func pass(s string) bool {
@@ -63,27 +63,27 @@ func fetchValFromFunc(s string) string {
 }
 
 func ParserTableSQL(s string) Table {
-	fmt.Printf("      - ParserTableSQL开始执行\n")
+	logger.Debug("ParserTableSQL开始执行")
 	var t = Table{}
 	lines := strings.Split(s, "\n")
-	fmt.Printf("      - DDL分割为 %d 行\n", len(lines))
-	
+	logger.Debug("DDL分割为 %d 行", len(lines))
+
 	for index := 0; index < len(lines); index++ {
 		line := strings.TrimSpace(lines[index])
 		if index%10 == 0 {
-			fmt.Printf("      - 正在处理第 %d/%d 行\n", index+1, len(lines))
+			logger.Debug("正在处理第 %d/%d 行", index+1, len(lines))
 		}
-		
+
 		if pass(line) {
 			continue
 		}
 		if t.parserTableName(line) {
-			fmt.Printf("      - 解析到表名: %s\n", t.DDL.TableName)
+			logger.Debug("解析到表名: %s", t.DDL.TableName)
 			continue
 		}
 		if t.parserField(line) {
 			if len(t.Field) > 0 {
-				fmt.Printf("      - 解析到字段: %s (总计 %d 个字段)\n", t.Field[len(t.Field)-1].Name, len(t.Field))
+				logger.Debug("解析到字段: %s (总计 %d 个字段)", t.Field[len(t.Field)-1].Name, len(t.Field))
 			}
 			continue
 		}
@@ -91,7 +91,7 @@ func ParserTableSQL(s string) Table {
 			continue
 		}
 		if t.parserEngine(line) {
-			fmt.Printf("      - 解析到引擎: %s\n", t.DDL.Engine)
+			logger.Debug("解析到引擎: %s", t.DDL.Engine)
 			continue
 		}
 		if t.parserPartitionss(line) {
@@ -104,6 +104,6 @@ func ParserTableSQL(s string) Table {
 			continue
 		}
 	}
-	fmt.Printf("      - ParserTableSQL执行完成，解析到 %d 个字段\n", len(t.Field))
+	logger.Debug("ParserTableSQL执行完成，解析到 %d 个字段", len(t.Field))
 	return t
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -12,14 +13,30 @@ import (
 	"cksr/config"
 	"cksr/database"
 	"cksr/fileops"
+	"cksr/logger"
 	"cksr/parser"
 )
 
 func main() {
 	var configPath string
-	
+	var logLevel string
+
+	// 定义命令行参数
+	flag.StringVar(&configPath, "config", "", "配置文件路径")
+	flag.StringVar(&logLevel, "log-level", "INFO", "日志级别 (SILENT, ERROR, WARN, INFO, DEBUG)")
+	flag.Parse()
+
+	// 检查环境变量LOG_LEVEL，如果设置了则优先使用
+	if envLogLevel := os.Getenv("LOG_LEVEL"); envLogLevel != "" {
+		logLevel = envLogLevel
+	}
+
+	// 设置日志级别
+	logger.SetLogLevel(logger.ParseLogLevel(logLevel))
+	logger.Info("日志级别设置为: %s", logger.LogLevelString(logger.GetCurrentLevel()))
+
 	// 如果没有提供配置文件参数，使用默认的config.example.json
-	if len(os.Args) < 2 {
+	if configPath == "" {
 		// 获取程序当前目录
 		execPath, err := os.Executable()
 		if err != nil {
@@ -27,21 +44,35 @@ func main() {
 		}
 		execDir := filepath.Dir(execPath)
 		configPath = filepath.Join(execDir, "config.example.json")
-		
+
 		// 检查默认配置文件是否存在
 		if _, err := os.Stat(configPath); os.IsNotExist(err) {
 			log.Fatalf("未提供配置文件参数，且默认配置文件 %s 不存在", configPath)
 		}
-		
-		log.Printf("使用默认配置文件: %s", configPath)
+
+		logger.Info("使用默认配置文件: %s", configPath)
 	} else {
-		configPath = os.Args[1]
+		logger.Info("使用配置文件: %s", configPath)
 	}
 
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}
+
+	// 初始化文件日志（如果配置中启用了）
+	if err := logger.InitFileLogging(cfg.Log.EnableFileLog, cfg.Log.LogFilePath, cfg.TempDir); err != nil {
+		log.Fatalf("初始化文件日志失败: %v", err)
+	}
+	
+	// 如果配置文件中指定了日志级别，则覆盖命令行参数
+	if cfg.Log.LogLevel != "" {
+		logger.SetLogLevel(logger.ParseLogLevel(cfg.Log.LogLevel))
+		logger.Info("从配置文件设置日志级别为: %s", logger.LogLevelString(logger.GetCurrentLevel()))
+	}
+
+	// 确保程序退出时关闭日志文件
+	defer logger.CloseLogFile()
 
 	// 处理多个数据库对
 	for i, pair := range cfg.DatabasePairs {
@@ -66,7 +97,7 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 	pairName := pair.Name
 
 	// 1. 导出ClickHouse表结构
-	fmt.Println("正在导出ClickHouse表结构...")
+	logger.Info("正在导出ClickHouse表结构...")
 	ckSchemaMap, err := dbPairManager.ExportClickHouseTables()
 	if err != nil {
 		return fmt.Errorf("导出ClickHouse表结构失败: %w", err)
@@ -78,8 +109,8 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 	}
 
 	// 2. 导出StarRocks表结构
-	fmt.Println("正在导出StarRocks表结构...")
-	
+	logger.Info("正在导出StarRocks表结构...")
+
 	// 2.1 先获取表名列表
 	srTableNames, err := dbPairManager.GetStarRocksTableNames()
 	if err != nil {
@@ -89,44 +120,44 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 	// 2.2 如果配置了表后缀，先执行重命名
 	var renameSQLs []string
 	if suffix := pair.SRTableSuffix; suffix != "" {
-		fmt.Printf("正在为StarRocks表添加后缀 '%s'...\n", suffix)
+		logger.Info("正在为StarRocks表添加后缀 '%s'...", suffix)
 		for _, tableName := range srTableNames {
 			if !strings.HasSuffix(tableName, suffix) {
 				// 检查表是否为VIEW
 				isView, err := dbPairManager.CheckStarRocksTableIsView(tableName)
 				if err != nil {
-					fmt.Printf("警告: 检查表 %s 类型失败: %v，跳过重命名\n", tableName, err)
+					logger.Warn("检查表 %s 类型失败: %v，跳过重命名", tableName, err)
 					continue
 				}
-				
+
 				if isView {
-					fmt.Printf("跳过VIEW表: %s (VIEW表不需要重命名)\n", tableName)
+					logger.Debug("跳过VIEW表: %s (VIEW表不需要重命名)", tableName)
 					continue
 				}
-				
+
 				// 检查表是否为native表
 				isNative, err := dbPairManager.CheckStarRocksTableIsNative(tableName)
 				if err != nil {
-					fmt.Printf("警告: 检查表 %s 类型失败: %v，跳过重命名\n", tableName, err)
+					logger.Warn("检查表 %s 类型失败: %v，跳过重命名", tableName, err)
 					continue
 				}
-				
+
 				if !isNative {
-					fmt.Printf("跳过非native表: %s (不支持ALTER TABLE RENAME操作)\n", tableName)
+					logger.Debug("跳过非native表: %s (不支持ALTER TABLE RENAME操作)", tableName)
 					continue
 				}
-				
+
 				newTableName := tableName + suffix
 				// 使用StarRocks支持的ALTER TABLE RENAME语法
-				renameSQL := fmt.Sprintf("ALTER TABLE `%s`.`%s` RENAME `%s`", 
+				renameSQL := fmt.Sprintf("ALTER TABLE `%s`.`%s` RENAME `%s`",
 					pair.StarRocks.Database, tableName, newTableName)
 				renameSQLs = append(renameSQLs, renameSQL)
 			}
 		}
-		
+
 		// 执行重命名
 		if len(renameSQLs) > 0 {
-			fmt.Println("正在执行SR表重命名语句...")
+			logger.Info("正在执行SR表重命名语句...")
 			if err := dbPairManager.ExecuteBatchSQL(renameSQLs, false); err != nil {
 				return fmt.Errorf("执行SR表重命名语句失败: %w", err)
 			}
@@ -140,13 +171,13 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 	}
 
 	// 2.4 为所有StarRocks表添加syncFromCK字段
-	fmt.Println("正在为StarRocks表添加syncFromCK字段...")
+	logger.Info("正在为StarRocks表添加syncFromCK字段...")
 	err = dbPairManager.AddSyncFromCKColumnToAllTables()
 	if err != nil {
 		return fmt.Errorf("为StarRocks表添加syncFromCK字段失败: %v", err)
 	}
 
-	fmt.Println("syncFromCK字段添加完成")
+	logger.Info("syncFromCK字段添加完成")
 
 	// 保存StarRocks表结构
 	if err := fileManager.WriteStarRocksSchemas(srSchemaMap, pairName); err != nil {
@@ -154,7 +185,7 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 	}
 
 	// 3. 创建StarRocks Catalog（使用配置中指定的catalog名称）
-	fmt.Println("正在创建StarRocks Catalog...")
+	logger.Info("正在创建StarRocks Catalog...")
 	catalogName := pair.CatalogName
 	if catalogName == "" {
 		// 如果没有配置catalog名称，使用默认格式
@@ -171,112 +202,143 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 		return fmt.Errorf("获取重命名后的StarRocks表名列表失败: %w", err)
 	}
 
+	// 调试：打印StarRocks表名列表
+	logger.Debug("StarRocks表名列表: %v", finalSrTableNames)
+
 	// 构建StarRocks表名映射（重命名后的表名 -> 原始表名）
 	srTableMap := make(map[string]string)
 	suffix := strings.TrimSpace(pair.SRTableSuffix)
+	logger.Debug("配置的表名后缀: '%s'", suffix)
+
 	for _, finalTableName := range finalSrTableNames {
 		originalTableName := finalTableName
 		if suffix != "" && strings.HasSuffix(finalTableName, suffix) {
 			originalTableName = strings.TrimSuffix(finalTableName, suffix)
 		}
 		srTableMap[originalTableName] = finalTableName
+		logger.Debug("表名映射: %s -> %s", originalTableName, finalTableName)
 	}
 
+	// 调试：打印ClickHouse表名列表
+	var ckTableNames []string
+	for tableName := range ckSchemaMap {
+		ckTableNames = append(ckTableNames, tableName)
+	}
+	logger.Debug("ClickHouse表名列表: %v", ckTableNames)
+
 	commonTables := []string{}
-	
+
 	// 找出共同的表（基于原始表名）
 	for originalTableName := range ckSchemaMap {
 		if _, exists := srTableMap[originalTableName]; exists {
 			commonTables = append(commonTables, originalTableName)
+			logger.Debug("找到共同表: %s (StarRocks表名: %s)", originalTableName, srTableMap[originalTableName])
+		} else {
+			logger.Debug("ClickHouse表 %s 在StarRocks中未找到对应表", originalTableName)
 		}
 	}
-	
-	fmt.Printf("找到%d个共同的表: %v\n", len(commonTables), commonTables)
+
+	logger.Info("找到%d个共同的表: %v", len(commonTables), commonTables)
 
 	var alterSQLs []string
 	var viewSQLs []string
 
-	fmt.Printf("\n开始处理表，总共 %d 个表需要处理...\n", len(commonTables))
+	logger.Info("开始处理表，总共 %d 个表需要处理...", len(commonTables))
 	for i, tableName := range commonTables {
-		fmt.Printf("\n[%d/%d] 正在处理表: %s\n", i+1, len(commonTables), tableName)
+		logger.Info("[%d/%d] 正在处理表: %s", i+1, len(commonTables), tableName)
 
 		// 检查StarRocks表是否为VIEW
-		srTableName := srTableMap[tableName] // 获取重命名后的实际表名
+		srTableName := srTableMap[tableName] // 检查StarRocks表是否为VIEW类型
 		isView, err := dbPairManager.CheckStarRocksTableIsView(srTableName)
 		if err != nil {
-			fmt.Printf("警告: 检查表 %s 类型失败: %v，跳过处理\n", srTableName, err)
+			logger.Warn("检查表 %s 类型失败: %v，跳过处理", srTableName, err)
 			continue
 		}
-		
+
 		if isView {
-			fmt.Printf("  - 跳过VIEW表: %s (VIEW表不需要处理ALTER TABLE和CREATE VIEW操作)\n", srTableName)
+			logger.Debug("跳过VIEW表: %s (VIEW表不需要处理ALTER TABLE和CREATE VIEW操作)", srTableName)
 			continue
 		}
 
 		// 解析ClickHouse表结构
-		fmt.Printf("  - 正在解析ClickHouse表结构...\n")
+		logger.Debug("正在解析ClickHouse表结构...")
 		ckTable, err := parseTableFromString(ckSchemaMap[tableName], pair.ClickHouse.Database, tableName)
 		if err != nil {
 			return fmt.Errorf("解析ClickHouse表%s失败: %w", tableName, err)
 		}
-		fmt.Printf("  - ClickHouse表结构解析完成\n")
+		logger.Debug("ClickHouse表结构解析完成")
 
 		// 解析StarRocks表结构（直接获取DDL）
-		fmt.Printf("  - 正在获取StarRocks表DDL (表名: %s)...\n", srTableName)
+		logger.Debug("正在获取StarRocks表DDL (表名: %s)...", srTableName)
 		srDDL, err := dbPairManager.GetStarRocksTableDDL(srTableName)
 		if err != nil {
 			return fmt.Errorf("获取StarRocks表%s的DDL失败: %w", srTableName, err)
 		}
-		fmt.Printf("  - StarRocks表DDL获取完成\n")
-		
+		logger.Debug("StarRocks表DDL获取完成")
+
 		// 直接构造StarRocks表结构，避免依赖parseSchemaString的解析
-		fmt.Printf("  - 正在解析StarRocks表结构...\n")
+		logger.Debug("正在解析StarRocks表结构...")
 		srTable, err := parseTableFromString(srDDL, pair.StarRocks.Database, srTableName)
 		if err != nil {
 			return fmt.Errorf("解析StarRocks表%s失败: %w", srTableName, err)
 		}
-		fmt.Printf("  - StarRocks表结构解析完成\n")
+		logger.Debug("StarRocks表结构解析完成")
 
 		// 过滤掉通过add column操作新增的字段，确保后续流程的健壮性
-		fmt.Printf("  - 正在过滤字段...\n")
+		logger.Debug("正在过滤字段...")
+		logger.Debug("开始过滤字段 - ClickHouse表字段数量: %d", len(ckTable.Field))
 		ckTable = filterAddedColumns(ckTable)
+		logger.Debug("字段过滤完成 - 过滤后字段数量: %d", len(ckTable.Field))
 
 		// 生成ALTER TABLE和CREATE VIEW语句
-		fmt.Printf("  - 正在生成SQL语句...\n")
+		logger.Debug("正在生成SQL语句...")
+		logger.Debug("调用run函数生成SQL - ClickHouse表: %s.%s, StarRocks表: %s.%s",
+			ckTable.DDL.DBName, ckTable.DDL.TableName, srTable.DDL.DBName, srTable.DDL.TableName)
 		alterSQL, viewSQL, err := run(ckTable, srTable, catalogName)
 		if err != nil {
+			logger.Error("生成SQL语句失败: %v", err)
 			return fmt.Errorf("生成SQL语句失败: %w", err)
 		}
-		fmt.Printf("  - SQL语句生成完成\n")
+		logger.Debug("SQL语句生成完成")
+		logger.Debug("生成的ALTER SQL长度: %d字符", len(alterSQL))
+		logger.Debug("生成的VIEW SQL长度: %d字符", len(viewSQL))
+		logger.Debug("VIEW SQL内容预览:\n%s", viewSQL)
 
 		// 保存生成的SQL（为每个数据库对创建独立的文件）
-		fmt.Printf("  - 正在保存SQL文件...\n")
+		logger.Debug("正在保存SQL文件...")
 		sqlFileName := fmt.Sprintf("%s_%s", tableName, pairName)
+		logger.Debug("保存SQL文件名: %s", sqlFileName)
 		if err := fileManager.WriteGeneratedSQL(alterSQL, viewSQL, sqlFileName); err != nil {
+			logger.Error("写入生成的SQL失败: %v", err)
 			return fmt.Errorf("写入生成的SQL失败: %w", err)
 		}
-		fmt.Printf("  - 表 %s 处理完成\n\n", tableName)
+		logger.Debug("表 %s 处理完成", tableName)
 
 		alterSQLs = append(alterSQLs, alterSQL)
 		viewSQLs = append(viewSQLs, viewSQL)
 	}
 
 	// 7. 执行ALTER TABLE和CREATE VIEW语句
-	fmt.Println("正在执行ALTER TABLE语句...")
+	logger.Debug("准备执行 %d 个ALTER TABLE语句", len(alterSQLs))
+	logger.Info("正在执行ALTER TABLE语句...")
 	if err := dbPairManager.ExecuteBatchSQL(alterSQLs, true); err != nil {
+		logger.Error("执行ALTER TABLE语句失败: %v", err)
 		return fmt.Errorf("执行ALTER TABLE语句失败: %w", err)
 	}
 
-	fmt.Println("正在执行CREATE VIEW语句...")
+	logger.Debug("准备执行 %d 个CREATE VIEW语句", len(viewSQLs))
+	for i, viewSQL := range viewSQLs {
+		logger.Debug("VIEW SQL #%d:\n%s", i+1, viewSQL)
+	}
+	logger.Info("正在执行CREATE VIEW语句...")
 	if err := dbPairManager.ExecuteBatchSQL(viewSQLs, false); err != nil {
+		logger.Error("执行CREATE VIEW语句失败: %v", err)
 		return fmt.Errorf("执行CREATE VIEW语句失败: %w", err)
 	}
 
-	fmt.Printf("数据库对 %s 处理完成\n", pairName)
+	logger.Info("数据库对 %s 处理完成", pairName)
 	return nil
 }
-
-
 
 // filterAddedColumns 过滤掉通过add column操作新增的字段
 func filterAddedColumns(table parser.Table) parser.Table {
@@ -287,36 +349,33 @@ func filterAddedColumns(table parser.Table) parser.Table {
 
 // parseTableFromString 从DDL字符串解析表结构，并设置正确的数据库名和表名
 func parseTableFromString(ddl string, dbName string, tableName string) (parser.Table, error) {
-	fmt.Printf("    - 开始解析DDL，长度: %d 字符\n", len(ddl))
-	fmt.Printf("    - DDL前100字符: %s...\n", ddl[:min(100, len(ddl))])
-	
 	// 输出完整DDL内容用于分析
-	fmt.Printf("    - 完整DDL内容:\n%s\n", ddl)
-	fmt.Printf("    - DDL内容结束\n")
-	
+	logger.Debug("完整DDL内容:\n%s", ddl)
+	logger.Debug("DDL内容结束")
+
 	// 使用超时机制防止解析阻塞
 	done := make(chan parser.Table, 1)
 	go func() {
-		fmt.Printf("    - 调用ParserTableSQL函数...\n")
+		logger.Debug("调用ParserTableSQL函数...")
 		table := parser.ParserTableSQL(ddl)
-		fmt.Printf("    - ParserTableSQL函数执行完成\n")
+		logger.Debug("ParserTableSQL函数执行完成")
 		done <- table
 	}()
-	
+
 	select {
 	case table := <-done:
-		fmt.Printf("    - DDL解析成功\n")
+		logger.Debug("DDL解析成功")
 		// 强制设置正确的数据库名和表名，避免依赖DDL中的解析结果
-		if dbName != ""{
-		table.DDL.DBName = dbName
+		if dbName != "" {
+			table.DDL.DBName = dbName
 		}
-		if tableName != ""{
+		if tableName != "" {
 			table.DDL.TableName = tableName
 		}
-		fmt.Printf("    - 设置数据库名: %s, 表名: %s\n", dbName, tableName)
+		logger.Debug("设置数据库名: %s, 表名: %s", dbName, tableName)
 		return table, nil
 	case <-time.After(60 * time.Second):
-		fmt.Printf("    - DDL解析超时 (60秒)\n")
+		logger.Warn("DDL解析超时 (60秒)")
 		return parser.Table{}, fmt.Errorf("DDL解析超时")
 	}
 }
@@ -341,26 +400,64 @@ FROM %s.default.network_security_log
 }
 
 func run(ckTable, srTable parser.Table, catalogName string) (string, string, error) {
+	logger.Debug("run函数开始 - catalogName: %s", catalogName)
+	logger.Debug("ClickHouse表字段数量: %d", len(ckTable.Field))
+	logger.Debug("StarRocks表字段数量: %d", len(srTable.Field))
+
 	// 生成字段转换器
+	logger.Debug("开始创建字段转换器...")
 	fieldConverters, err := builder.NewConverters(ckTable)
 	if err != nil {
+		logger.Error("创建字段转换器失败: %v", err)
 		return "", "", fmt.Errorf("failed to create field converters: %w", err)
 	}
+	logger.Debug("字段转换器创建完成，创建了 %d 个字段转换器", len(fieldConverters))
 
 	// 使用builder生成SQL语句
+	logger.Debug("开始创建ALTER builder...")
 	alterBuilder := builder.NewCKAddColumnsBuilder(fieldConverters, ckTable.DDL.DBName, ckTable.DDL.TableName)
+	logger.Debug("ALTER builder创建完成")
+
+	logger.Debug("开始创建VIEW builder...")
 	viewBuilder := builder.NewBuilder(
 		fieldConverters,
 		srTable.Field,
 		ckTable.DDL.DBName, ckTable.DDL.TableName, catalogName,
 		srTable.DDL.DBName, srTable.DDL.TableName,
 	)
+	logger.Debug("VIEW builder创建完成")
 
 	// 生成ALTER和VIEW语句
+	logger.Debug("开始生成ALTER SQL...")
 	alterSql := alterBuilder.Build()
+	logger.Debug("ALTER SQL生成完成，长度: %d", len(alterSql))
+	
+	// 添加完整ALTER SQL语句的调试输出
+	if alterSql != "" {
+		logger.Debug("=== 完整ALTER SQL语句 ===")
+		logger.Debug("数据库: %s.%s", ckTable.DDL.DBName, ckTable.DDL.TableName)
+		logger.Debug("SQL内容:\n%s", alterSql)
+		logger.Debug("=== ALTER SQL语句结束 ===")
+	} else {
+		logger.Debug("ALTER SQL为空，无需执行ALTER操作")
+	}
+
+	logger.Debug("开始生成VIEW SQL...")
 	view, err := viewBuilder.Build()
 	if err != nil {
+		logger.Error("构建视图失败: %v", err)
 		return "", "", fmt.Errorf("failed to build view: %w", err)
+	}
+	logger.Debug("VIEW SQL生成完成，长度: %d", len(view))
+	
+	// 添加完整VIEW SQL语句的调试输出
+	if view != "" {
+		logger.Debug("=== 完整VIEW SQL语句 ===")
+		logger.Debug("视图名: %s.%s", srTable.DDL.DBName, ckTable.DDL.TableName)
+		logger.Debug("SQL内容:\n%s", view)
+		logger.Debug("=== VIEW SQL语句结束 ===")
+	} else {
+		logger.Debug("VIEW SQL为空")
 	}
 
 	return alterSql, view, nil

@@ -22,5 +22,10 @@
     }
   ],
   "temp_dir": "./temp",
-  "driver_url": "http://10.107.29.99:8000/clickhouse-jdbc-0.4.6.jar"
+  "driver_url": "http://10.107.29.99:8000/clickhouse-jdbc-0.4.6.jar",
+  "log": {
+    "enable_file_log": false,
+    "log_file_path": "",
+    "log_level": "INFO"
+  }
 }

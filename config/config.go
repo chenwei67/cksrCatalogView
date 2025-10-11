@@ -33,13 +33,24 @@ type DatabasePair struct {
 	StarRocks     DatabaseConfig `json:"starrocks"`
 }
 
+// LogConfig 日志配置
+type LogConfig struct {
+	// 是否启用文件日志
+	EnableFileLog bool `json:"enable_file_log"`
+	// 日志文件路径，如果为空且启用文件日志，则使用临时目录
+	LogFilePath string `json:"log_file_path"`
+	// 日志级别
+	LogLevel string `json:"log_level"`
+}
+
 // Config 应用配置
 type Config struct {
 	// 多数据库对配置
 	DatabasePairs []DatabasePair `json:"database_pairs"`
 
-	TempDir   string `json:"temp_dir"`
-	DriverURL string `json:"driver_url"`
+	TempDir   string    `json:"temp_dir"`
+	DriverURL string    `json:"driver_url"`
+	Log       LogConfig `json:"log"`
 }
 
 // LoadConfig 从配置文件加载配置
@@ -57,6 +68,11 @@ func LoadConfig(configPath string) (*Config, error) {
 	// 设置默认值
 	if config.TempDir == "" {
 		config.TempDir = "./temp"
+	}
+	
+	// 设置日志配置默认值
+	if config.Log.LogLevel == "" {
+		config.Log.LogLevel = "INFO"
 	}
 
 	// 验证配置

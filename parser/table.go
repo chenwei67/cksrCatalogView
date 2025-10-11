@@ -9,8 +9,8 @@
 package parser
 
 import (
-	"fmt"
 	"strings"
+	"cksr/logger"
 )
 
 func (t *Table) parserTableName(s string) bool {
@@ -19,11 +19,11 @@ func (t *Table) parserTableName(s string) bool {
 		return false
 	}
 	
-	fmt.Printf("        - 解析CREATE TABLE行: %s\n", s)
+	logger.Debug("解析CREATE TABLE行: %s", s)
 	
 	// 移除CREATE TABLE前缀
 	remaining := strings.TrimSpace(s[len(indexStr):])
-	fmt.Printf("        - 移除CREATE TABLE后: %s\n", remaining)
+	logger.Debug("移除CREATE TABLE后: %s", remaining)
 	
 	// 找到表名部分（在第一个空格或括号之前）
 	var tableName string
@@ -47,10 +47,10 @@ func (t *Table) parserTableName(s string) bool {
 		}
 	}
 	
-	fmt.Printf("        - 提取的表名: %s\n", tableName)
+	logger.Debug("提取的表名: %s", tableName)
 	
 	if tableName == "" {
-		fmt.Printf("        - 表名解析失败\n")
+		logger.Debug("表名解析失败")
 		return false
 	}
 	
@@ -65,7 +65,7 @@ func (t *Table) parserTableName(s string) bool {
 		t.DDL.TableName = strings.Trim(tableName, "`")
 	}
 	
-	fmt.Printf("        - 最终解析结果 - 数据库: %s, 表名: %s\n", t.DDL.DBName, t.DDL.TableName)
+	logger.Debug("最终解析结果 - 数据库: %s, 表名: %s", t.DDL.DBName, t.DDL.TableName)
 	return true
 }
 
@@ -131,7 +131,7 @@ func fetchWord(ss string, begin int) (string, int) {
 	}
 	
 	if stackIndex > 1 {
-		fmt.Println("字段解析异常,括号退栈失败,", ss, "|", len(stack), stackIndex)
+		logger.Error("字段解析异常,括号退栈失败, %s | %d %d", ss, len(stack), stackIndex)
 		panic("字段解析异常,括号退栈失败")
 	}
 	
