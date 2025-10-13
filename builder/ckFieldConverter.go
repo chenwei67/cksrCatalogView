@@ -136,7 +136,13 @@ func ckNameMap(f *parser.Field, names map[string]struct{}) *parser.Field {
 	logger.Debug("ckNameMap开始处理字段: %s (类型: %s)", f.Name, f.Type)
 	
 	newF := new(parser.Field)
-	if IsArray(f.Type) {
+	if IsArrayIPV6(f.Type) {
+		logger.Debug("字段 %s 是Array(IPv6)类型，需要名称映射", f.Name)
+		newF.Name = nameWithSuffix(f.Name, names)
+		newF.Type = TypeString
+		logger.Debug("Array(IPv6)字段映射完成: %s -> %s (类型: %s)", f.Name, newF.Name, newF.Type)
+		return newF
+	} else if IsArray(f.Type) {
 		logger.Debug("字段 %s 是数组类型，需要名称映射", f.Name)
 		newF.Name = nameWithSuffix(f.Name, names)
 		newF.Type = TypeString
@@ -262,4 +268,12 @@ func IsIPV4(t string) bool {
 
 func IsIPV6(t string) bool {
 	return strings.ToLower(t) == "ipv6"
+}
+
+func IsArrayIPV6(t string) bool {
+	return strings.ToLower(t) == "array(ipv6)"
+}
+
+func IsArrayIPV4(t string) bool {
+	return strings.ToLower(t) == "array(ipv4)"
 }

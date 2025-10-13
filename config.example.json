@@ -2,10 +2,10 @@
   "database_pairs": [
     {
       "name": "cold",
-      "catalog_name": "cold_catalog",
+      "catalog_name": "cw_cold_catalog",
       "sr_table_suffix": "_local_catalog",
       "clickhouse": {
-        "host": "10.117.64.15",
+        "host": "10.117.64.12",
         "port": 31004,
         "http_port": 31003,
         "username": "root",
@@ -17,15 +17,15 @@
         "port": 30938,
         "username": "root",
         "password": "",
-        "database": "cw"
+        "database": "cw0"
       }
     }
   ],
   "temp_dir": "./temp",
-  "driver_url": "http://10.107.29.99:8000/clickhouse-jdbc-0.4.6.jar",
+  "driver_url": "http://10.32.45.10/ftpdata/clickhouse-jdbc-0.4.6-all.jar",
   "log": {
-    "enable_file_log": false,
+    "enable_file_log": true,
     "log_file_path": "",
-    "log_level": "INFO"
+    "log_level": "DEBUG"
   }
 }

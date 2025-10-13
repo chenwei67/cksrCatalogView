@@ -69,7 +69,7 @@ func LoadConfig(configPath string) (*Config, error) {
 	if config.TempDir == "" {
 		config.TempDir = "./temp"
 	}
-	
+
 	// 设置日志配置默认值
 	if config.Log.LogLevel == "" {
 		config.Log.LogLevel = "INFO"
@@ -111,7 +111,7 @@ func (c *Config) GetClickHouseJDBCURIByIndex(index int) string {
 		return ""
 	}
 	pair := c.DatabasePairs[index]
-	return fmt.Sprintf("jdbc:clickhouse://%s:%d/?database=%s&autoCommit=true&socket_timeout=300000&connection_timeout=10000&compress=true",
+	return fmt.Sprintf("jdbc:clickhouse://%s:%d/?database=%s&autoCommit=true&socket_timeout=300000&connection_timeout=30000&compress=true&allow_jdbctemplate_transactions=0",
 		pair.ClickHouse.Host, pair.ClickHouse.HTTPPort, pair.ClickHouse.Database)
 }
 

@@ -1,9 +1,9 @@
 package builder
 
 import (
+	"cksr/logger"
 	"fmt"
 	"strings"
-	"cksr/logger"
 )
 
 type CKAddColumnBuilder struct {
@@ -16,16 +16,21 @@ func NewCKAddColumnBuilder(c FieldConverter) CKAddColumnBuilder {
 
 func (c CKAddColumnBuilder) Build() string {
 	logger.Debug("CKAddColumnBuilder.Build() 开始构建字段: %s", c.converter.Name)
-	
+
 	if c.converter.OriginField == nil {
 		logger.Debug("CKAddColumnBuilder.Build() 原始字段为空，跳过字段: %s", c.converter.Name)
 		return ""
 	}
-	
+
 	_type := c.converter.OriginField.Type
 	logger.Debug("CKAddColumnBuilder.Build() 字段 %s 的类型: %s", c.converter.Name, _type)
-	
-	if IsStringArray(_type) {
+
+	if IsArrayIPV6(_type) {
+		logger.Debug("CKAddColumnBuilder.Build() 字段 %s 识别为Array(IPv6)类型，使用 stringAlias + aliasArrayIPV6StringConcat", c.converter.Name)
+		result := c.buildAddLine(c.stringAlias, c.aliasArrayIPV6StringConcat)
+		logger.Debug("CKAddColumnBuilder.Build() 字段 %s 构建结果: %s", c.converter.Name, result)
+		return result
+	} else if IsStringArray(_type) {
 		logger.Debug("CKAddColumnBuilder.Build() 字段 %s 识别为字符串数组类型，使用 stringAlias + aliasStringConcat", c.converter.Name)
 		result := c.buildAddLine(c.stringAlias, c.aliasStringConcat)
 		logger.Debug("CKAddColumnBuilder.Build() 字段 %s 构建结果: %s", c.converter.Name, result)
@@ -46,7 +51,7 @@ func (c CKAddColumnBuilder) Build() string {
 		logger.Debug("CKAddColumnBuilder.Build() 字段 %s 构建结果: %s", c.converter.Name, result)
 		return result
 	}
-	
+
 	// 不需要新增列
 	logger.Debug("CKAddColumnBuilder.Build() 字段 %s 不需要新增列，跳过", c.converter.Name)
 	return ""
@@ -54,19 +59,19 @@ func (c CKAddColumnBuilder) Build() string {
 
 func (c CKAddColumnBuilder) buildAddLine(aliasFunc func(string, string) string, transFunc func(string) string) string {
 	logger.Debug("CKAddColumnBuilder.buildAddLine() 开始构建字段 %s 的ADD LINE", c.converter.Name)
-	
+
 	originalFieldName := c.converter.OriginField.Name
 	logger.Debug("CKAddColumnBuilder.buildAddLine() 原始字段名: %s", originalFieldName)
-	
+
 	transformedName := transFunc(originalFieldName)
 	logger.Debug("CKAddColumnBuilder.buildAddLine() 转换后的表达式: %s", transformedName)
-	
+
 	aliasExpression := aliasFunc(c.converter.Name, transformedName)
 	logger.Debug("CKAddColumnBuilder.buildAddLine() 别名表达式: %s", aliasExpression)
-	
+
 	result := c.addColumn(aliasExpression)
 	logger.Debug("CKAddColumnBuilder.buildAddLine() 最终ADD COLUMN语句: %s", result)
-	
+
 	return result
 }
 
@@ -99,7 +104,11 @@ func (c CKAddColumnBuilder) aliasToUInt32(name string) string {
 }
 
 func (c CKAddColumnBuilder) aliasReinterpretAsUInt128(name string) string {
-	return fmt.Sprintf("reinterpretAsUInt128(reverse(reinterpretAsFixedString(%s)))", name)
+	return fmt.Sprintf("reinterpretAsUInt128(reverse(reinterpretAsFixedString(%s))) - - toUInt128('170141183460469231731687303715884105728')", name)
+}
+
+func (c CKAddColumnBuilder) aliasArrayIPV6StringConcat(arrayName string) string {
+	return fmt.Sprintf("arrayStringConcat(arrayMap(x -> reinterpretAsUInt128(reverse(reinterpretAsFixedString(x))) - toUInt128('170141183460469231731687303715884105728'), %s), 'CKTOSRFRAGEMENT')", arrayName)
 }
 
 type CKAddColumnsBuilder struct {
@@ -127,7 +136,7 @@ func (c CKAddColumnsBuilder) Build() string {
 	logger.Debug("CKAddColumnsBuilder.Build() 开始构建ALTER TABLE语句")
 	logger.Debug("CKAddColumnsBuilder.Build() 数据库: %s, 表名: %s", c.dbName, c.tableName)
 	logger.Debug("CKAddColumnsBuilder.Build() 字段构建器数量: %d", len(c.builders))
-	
+
 	// 如果没有需要添加的字段，返回空字符串
 	if len(c.builders) == 0 {
 		logger.Debug("CKAddColumnsBuilder.Build() 没有字段构建器，返回空字符串")
@@ -137,7 +146,7 @@ func (c CKAddColumnsBuilder) Build() string {
 	// 收集所有有效的字段定义
 	var validFields []string
 	logger.Debug("CKAddColumnsBuilder.Build() 开始收集有效字段定义...")
-	
+
 	for i, builder := range c.builders {
 		logger.Debug("CKAddColumnsBuilder.Build() 处理第 %d 个字段构建器", i+1)
 		s := builder.Build()
@@ -161,7 +170,7 @@ func (c CKAddColumnsBuilder) Build() string {
 	// 构建单条ALTER TABLE语句，包含多个ADD COLUMN子句
 	logger.Debug("CKAddColumnsBuilder.Build() 开始构建最终ALTER TABLE语句...")
 	var result strings.Builder
-	
+
 	alterTableHeader := fmt.Sprintf("ALTER TABLE %s.%s on cluster '{cluster}'\n", c.dbName, c.tableName)
 	logger.Debug("CKAddColumnsBuilder.Build() ALTER TABLE头部: %s", strings.TrimSpace(alterTableHeader))
 	result.WriteString(alterTableHeader)

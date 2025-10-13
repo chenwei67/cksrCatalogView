@@ -63,14 +63,14 @@ type SRTableBuilder struct {
 
 func (st *SRTableBuilder) addClauseField(srField SRField) {
 	logger.Debug("添加StarRocks字段到fields: %s", srField.Name)
-	
+
 	// 检查是否已存在同名字段
 	for i, existingField := range st.fields {
 		if existingField.Name == srField.Name {
 			logger.Warn("发现重复的StarRocks字段名: %s (索引: %d)", srField.Name, i)
 		}
 	}
-	
+
 	st.fields = append(st.fields, srField)
 	logger.Debug("当前StarRocks fields数量: %d, nameMap数量: %d", len(st.fields), len(st.nameMap))
 }
@@ -92,35 +92,35 @@ func NewCKTableBuilder(fieldConverters []FieldConverter, tableName, dbName, cata
 
 func NewSRTableBuilder(fields []parser.Field, tableName, dbName string) SRTableBuilder {
 	logger.Debug("创建SRTableBuilder，输入字段数量: %d", len(fields))
-	
+
 	m := make(map[string]SRField)
 	skippedCount := 0
 	duplicateCount := 0
-	
+
 	for i, f := range fields {
 		logger.Debug("处理StarRocks字段 #%d: %s (类型: %s)", i+1, f.Name, f.Type)
-		
+
 		// 忽略syncFromCK字段，这是StarRocks专用的标识字段，不参与视图映射
 		if f.Name == "syncFromCK" {
 			logger.Debug("跳过syncFromCK字段")
 			skippedCount++
 			continue
 		}
-		
+
 		// 检查是否已存在同名字段
 		if _, exists := m[f.Name]; exists {
 			logger.Warn("发现重复的字段名: %s，将覆盖之前的定义", f.Name)
 			duplicateCount++
 		}
-		
+
 		m[f.Name] = SRField{
 			Field: f,
 		}
 	}
-	
-	logger.Debug("SRTableBuilder创建完成 - 总字段: %d, 跳过: %d, 重复: %d, 最终nameMap数量: %d", 
+
+	logger.Debug("SRTableBuilder创建完成 - 总字段: %d, 跳过: %d, 重复: %d, 最终nameMap数量: %d",
 		len(fields), skippedCount, duplicateCount, len(m))
-	
+
 	return SRTableBuilder{
 		TableBuilder: TableBuilder{
 			DBName: dbName,
@@ -182,22 +182,22 @@ func (v *ViewBuilder) Build() (string, error) {
 	logger.Debug("StarRocks表: %s.%s", v.sr.DBName, v.sr.Name)
 	logger.Debug("ClickHouse字段转换器数量: %d", len(v.ck.converters))
 	logger.Debug("StarRocks字段映射数量: %d", len(v.sr.nameMap))
-	
+
 	processedFields := 0
 	skippedFields := 0
-	
+
 	for i, fieldConverter := range v.ck.converters {
 		if i > 0 && i%100 == 0 {
 			logger.Debug("ViewBuilder字段处理进度: %d/%d", i, len(v.ck.converters))
 		}
-		
+
 		logger.Debug("处理ClickHouse字段 #%d: %s (类型: %s)", i+1, fieldConverter.originName(), fieldConverter.originType())
-		
+
 		ckField := NewCKField(fieldConverter)
 		// if ckField.Ignore() {
 		// 	continue
 		// }
-		
+
 		logger.Debug("开始映射StarRocks字段...")
 		srField, err := v.MapSRField(fieldConverter, v.sr.nameMap)
 		if err != nil {
@@ -217,47 +217,47 @@ func (v *ViewBuilder) Build() (string, error) {
 		logger.Debug("生成ClickHouse字段子句...")
 		ckField.GenClause()
 		v.ck.addClauseField(ckField)
-		
+
 		processedFields++
 		logger.Debug("字段 %s 处理完成", fieldConverter.originName())
 	}
-	
+
 	logger.Debug("字段处理完成 - 总数: %d, 处理: %d, 跳过: %d", len(v.ck.converters), processedFields, skippedFields)
 	logger.Debug("最终映射的字段数量 - ClickHouse: %d, StarRocks: %d", len(v.ck.fields), len(v.sr.fields))
-	
+
 	if len(v.ck.fields) == 0 {
 		logger.Error("ClickHouse字段为空，无法创建视图")
 		return "", fmt.Errorf("ck field is empty")
 	}
-	
+
 	// 添加详细的字段映射验证日志
 	logger.Debug("开始字段映射验证 - StarRocks字段总数: %d, 已映射字段数: %d", len(v.sr.nameMap), len(v.sr.fields))
-	
+
 	// 添加字段名称统计
 	fieldNames := make(map[string]int)
 	for _, field := range v.sr.fields {
 		fieldNames[field.Name]++
 	}
-	
+
 	duplicateFieldNames := make([]string, 0)
 	for name, count := range fieldNames {
 		if count > 1 {
 			duplicateFieldNames = append(duplicateFieldNames, fmt.Sprintf("%s(x%d)", name, count))
 		}
 	}
-	
+
 	if len(duplicateFieldNames) > 0 {
 		logger.Error("发现重复的字段名: %v", duplicateFieldNames)
 	}
-	
+
 	logger.Debug("字段名称统计完成 - 唯一字段名: %d, 重复字段名: %d", len(fieldNames), len(duplicateFieldNames))
-	
+
 	if len(v.sr.fields) != len(v.sr.nameMap) {
 		var err error
 		var fs []SRField
 		nameMapCopy := make(map[string]SRField)
 		maps.Copy(nameMapCopy, v.sr.nameMap)
-		
+
 		logger.Debug("检查字段映射一致性...")
 		for i, f := range v.sr.fields {
 			logger.Debug("检查字段 #%d: %s", i+1, f.Name)
@@ -268,7 +268,7 @@ func (v *ViewBuilder) Build() (string, error) {
 				delete(nameMapCopy, f.Name)
 			}
 		}
-		
+
 		if len(fs) != 0 {
 			logger.Error("发现不存在于DDL中的字段: %+v", fs)
 			err = fmt.Errorf("build select column in view error, some fields not exists in create sql ddl: %+v", fs)
@@ -285,16 +285,16 @@ func (v *ViewBuilder) Build() (string, error) {
 				err = fmt.Errorf("build select column in view error, some fields exists in create sql ddl but not in view select: %+v", lackfs)
 			}
 		}
-		
+
 		// 如果err仍然为nil，说明字段数量不匹配但没有具体的错误字段，这是一个异常情况
 		if err == nil {
 			err = fmt.Errorf("字段映射数量不匹配: sr.fields数量=%d, sr.nameMap数量=%d, 但未发现具体的不匹配字段", len(v.sr.fields), len(v.sr.nameMap))
 		}
-		
+
 		logger.Error("字段映射验证失败: %v", err)
 		return "", err
 	}
-	
+
 	logger.Debug("字段映射验证通过，开始生成SQL")
 
 	ckQ := v.ck.GenQuerySQL()
@@ -304,7 +304,7 @@ func (v *ViewBuilder) Build() (string, error) {
 
 	viewSQL := v.GenViewSQL(ckQ, srQ)
 	logger.Debug("生成的CREATE VIEW SQL:\n%s", viewSQL)
-	
+
 	return viewSQL, nil
 }
 
@@ -312,9 +312,9 @@ func (v *ViewBuilder) GenViewSQL(ckQ, srQ string) string {
 	logger.Debug("开始生成视图SQL")
 	logger.Debug("ClickHouse查询SQL: %s", ckQ)
 	logger.Debug("StarRocks查询SQL: %s", srQ)
-	
+
 	sql := fmt.Sprintf("create view if not exists %s.%s as \n%s \nunion all \n%s; \n", v.dbName, v.viewName, ckQ, srQ)
-	
+
 	logger.Debug("最终视图SQL:\n%s", sql)
 	return sql
 }
@@ -334,10 +334,14 @@ func (f *CKField) Ignore() bool {
 // 构建clause
 func (f *CKField) GenClause() {
 	// 开始构建
-	if IsStringArray(f.originType()) {
+	if IsArrayIPV6(f.originType()) {
+		f.Clause = f.ArrayIPV6()
+	} else if IsStringArray(f.originType()) {
 		f.Clause = f.Array()
 	} else if IsArray(f.originType()) {
 		f.Clause = f.ArrayMap()
+	} else if f.IsAddedColumn() {
+		f.Clause = fmt.Sprintf("%s as %s", f.Name, f.SRField.Name)
 	} else {
 		f.Clause = f.Name
 	}
@@ -349,6 +353,10 @@ func (f *CKField) ArrayMap() string {
 
 func (f *CKField) Array() string {
 	return fmt.Sprintf("CASE \n\t\tWHEN %s = '' THEN ARRAY<String>[]\n\t\tELSE split(%s, 'CKTOSRFRAGEMENT')\n\tEND as %s", f.Name, f.Name, f.SRField.Name)
+}
+
+func (f *CKField) ArrayIPV6() string {
+	return fmt.Sprintf("CASE \n\t\tWHEN %s = '' THEN ARRAY<LARGEINT>[]\n\t\tELSE array_map(x -> CAST(x AS LARGEINT), split(%s, 'CKTOSRFRAGEMENT'))\n\tEND as %s", f.Name, f.Name, f.SRField.Name)
 }
 
 func (f *CKField) SRBasicType() string {
@@ -369,7 +377,9 @@ func (f *CKField) SRBasicType() string {
 // 映射到sr字段
 func (v *ViewBuilder) MapSRField(field FieldConverter, srNameFieldMap map[string]SRField) (SRField, error) {
 	name := field.originName()
-	if IsIPV6(field.originType()) || IsIPV4(field.originType()) {
+	if IsArrayIPV6(field.originType()) || IsArrayIPV4(field.originType()) {
+		name = fmt.Sprintf("%s_int", field.originName())
+	} else if IsIPV6(field.originType()) || IsIPV4(field.originType()) {
 		name = fmt.Sprintf("%s_int", field.originName())
 	}
 

@@ -268,6 +268,13 @@ func (dm *DatabasePairManager) CreateStarRocksCatalog(catalogName string) error 
 		dm.config.DriverURL,
 	)
 
+	// 打印catalog创建语句
+	logger.Info("正在创建StarRocks Catalog: %s", catalogName)
+	logger.Debug("=== Catalog创建SQL语句 ===")
+	logger.Debug("Catalog名称: %s", catalogName)
+	logger.Debug("SQL语句:\n%s", createCatalogSQL)
+	logger.Debug("=== Catalog创建SQL语句结束 ===")
+
 	return dm.ExecuteStarRocksSQL(createCatalogSQL)
 }
 
