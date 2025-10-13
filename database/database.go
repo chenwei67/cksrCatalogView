@@ -13,7 +13,9 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
+	"cksr/builder"
 	"cksr/config"
 	"cksr/logger"
 
@@ -405,6 +407,35 @@ func (dm *DatabasePairManager) CheckStarRocksTableIsView(tableName string) (bool
 }
 
 
+// CheckStarRocksIndexExists 检查StarRocks表中指定索引是否存在
+func (dm *DatabasePairManager) CheckStarRocksIndexExists(tableName, indexName string) (bool, error) {
+	db, err := dm.GetStarRocksConnection()
+	if err != nil {
+		return false, err
+	}
+	defer db.Close()
+
+	pair := dm.config.DatabasePairs[dm.pairIndex]
+
+	// 使用information_schema查询索引是否存在
+	query := `
+		SELECT COUNT(*) 
+		FROM information_schema.statistics 
+		WHERE table_schema = ? 
+		AND table_name = ? 
+		AND index_name = ?
+	`
+
+	var count int
+	err = db.QueryRow(query, pair.StarRocks.Database, tableName, indexName).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("检查索引 %s.%s.%s 是否存在失败: %w", 
+			pair.StarRocks.Database, tableName, indexName, err)
+	}
+
+	return count > 0, nil
+}
+
 // CheckClickHouseColumnExists 检查ClickHouse表中指定字段是否存在
 func (dm *DatabasePairManager) CheckClickHouseColumnExists(tableName, columnName string) (bool, error) {
 	db, err := dm.GetClickHouseConnection()
@@ -448,18 +479,91 @@ func (dm *DatabasePairManager) AddSyncFromCKColumnToTable(tableName string) erro
 
 	pair := dm.config.DatabasePairs[dm.pairIndex]
 	
-	// 构建添加字段的SQL
-	addColumnSQL := fmt.Sprintf(
-		"ALTER TABLE `%s`.`%s` ADD COLUMN `syncFromCK` BOOLEAN DEFAULT \"FALSE\" COMMENT '标识数据是否来自ClickHouse同步'",
-		pair.StarRocks.Database, tableName)
-
-	logger.Debug("正在为表 %s 添加 syncFromCK 字段...", tableName)
+	// 使用SRAddColumnBuilder构建SQL语句
+	builder := builder.NewSRAddColumnBuilder(pair.StarRocks.Database, tableName)
+	builder.AddSyncFromCKColumn()
 	
-	if err := dm.ExecuteStarRocksSQL(addColumnSQL); err != nil {
-		return fmt.Errorf("为表 %s 添加 syncFromCK 字段失败: %w", tableName, err)
+	// 分别获取字段和索引SQL
+	columnSQL := builder.Build()
+	indexSQLs := builder.BuildIndexes()
+	
+	logger.Debug("正在为表 %s 添加 syncFromCK 字段和索引...", tableName)
+	
+	// 第一步：添加字段
+	logger.Debug("执行字段添加SQL: %s", columnSQL)
+	if err := dm.ExecuteStarRocksSQL(columnSQL); err != nil {
+		return fmt.Errorf("为表 %s 添加字段失败: %w", tableName, err)
+	}
+	
+	// 等待DDL操作完成，给StarRocks时间更新元数据
+	logger.Debug("等待StarRocks元数据更新...")
+	time.Sleep(time.Second * 3)
+	
+	// 第二步：验证字段是否成功添加（带重试机制）
+	logger.Debug("验证字段是否成功添加...")
+	var columnExists bool
+	maxRetries := 20
+	retryDelay := time.Second * 2
+	
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		logger.Debug("第 %d 次验证字段存在性...", attempt)
+		
+		exists, err := dm.CheckStarRocksColumnExists(tableName, "syncFromCK")
+		if err != nil {
+			if attempt == maxRetries {
+				return fmt.Errorf("验证字段添加结果失败 (尝试 %d/%d): %w", attempt, maxRetries, err)
+			}
+			logger.Warn("第 %d 次验证失败，%v 秒后重试: %v", attempt, retryDelay.Seconds(), err)
+			time.Sleep(retryDelay)
+			continue
+		}
+		
+		if exists {
+			columnExists = true
+			logger.Debug("第 %d 次验证成功，字段已存在", attempt)
+			break
+		}
+		
+		if attempt < maxRetries {
+			logger.Debug("第 %d 次验证字段不存在，%v 秒后重试...", attempt, retryDelay.Seconds())
+			time.Sleep(retryDelay)
+		}
+	}
+	
+	if !columnExists {
+		return fmt.Errorf("字段添加后验证失败，经过 %d 次重试后 syncFromCK 字段仍不存在于表 %s", maxRetries, tableName)
+	}
+	
+	logger.Debug("字段 syncFromCK 添加成功，开始创建索引...")
+	
+	// 第三步：创建索引
+	for i, indexSQL := range indexSQLs {
+		logger.Debug("执行索引创建SQL [%d/%d]: %s", i+1, len(indexSQLs), indexSQL)
+		
+		// 检查索引是否已存在
+		indexName := "idx_syncFromCK" // 默认索引名
+		if strings.Contains(indexSQL, "`idx_syncFromCK`") {
+			indexExists, checkErr := dm.CheckStarRocksIndexExists(tableName, indexName)
+			if checkErr != nil {
+				logger.Warn("检查索引 %s 是否存在失败: %v，继续尝试创建", indexName, checkErr)
+			} else if indexExists {
+				logger.Debug("索引 %s 已存在，跳过创建", indexName)
+				continue
+			}
+		}
+		
+		if err := dm.ExecuteStarRocksSQL(indexSQL); err != nil {
+			// 如果是索引已存在的错误，记录警告但不中断流程
+			if strings.Contains(err.Error(), "Duplicate key name") || 
+			   strings.Contains(err.Error(), "already exists") {
+				logger.Warn("索引可能已存在，跳过: %v", err)
+				continue
+			}
+			return fmt.Errorf("为表 %s 创建索引失败 [%d/%d]: %w", tableName, i+1, len(indexSQLs), err)
+		}
 	}
 
-	logger.Debug("表 %s 的 syncFromCK 字段添加成功", tableName)
+	logger.Debug("表 %s 的 syncFromCK 字段和索引添加成功", tableName)
 	return nil
 }
 

@@ -33,7 +33,7 @@ func (r RollbackBuilder) BuildDropViewSQL() string {
 // BuildDropCKColumnSQL 构建删除ClickHouse表中带后缀列的SQL
 func (r RollbackBuilder) BuildDropCKColumnSQL(columnName string) string {
 	logger.Debug("RollbackBuilder.BuildDropCKColumnSQL() 构建删除CK列SQL: %s.%s.%s", r.dbName, r.tableName, columnName)
-	sql := fmt.Sprintf("ALTER TABLE `%s`.`%s` DROP COLUMN IF EXISTS `%s`", r.dbName, r.tableName, columnName)
+	sql := fmt.Sprintf("ALTER TABLE `%s`.`%s` on cluster '{cluster}' DROP COLUMN IF EXISTS `%s`", r.dbName, r.tableName, columnName)
 	logger.Debug("RollbackBuilder.BuildDropCKColumnSQL() 生成SQL: %s", sql)
 	return sql
 }
@@ -41,7 +41,7 @@ func (r RollbackBuilder) BuildDropCKColumnSQL(columnName string) string {
 // BuildDropSRColumnSQL 构建删除StarRocks表中新增列的SQL
 func (r RollbackBuilder) BuildDropSRColumnSQL(columnName string) string {
 	logger.Debug("RollbackBuilder.BuildDropSRColumnSQL() 构建删除SR列SQL: %s.%s.%s", r.dbName, r.tableName, columnName)
-	sql := fmt.Sprintf("ALTER TABLE `%s`.`%s` DROP COLUMN IF EXISTS `%s`", r.dbName, r.tableName, columnName)
+	sql := fmt.Sprintf("ALTER TABLE `%s`.`%s` DROP COLUMN `%s`", r.dbName, r.tableName, columnName)
 	logger.Debug("RollbackBuilder.BuildDropSRColumnSQL() 生成SQL: %s", sql)
 	return sql
 }

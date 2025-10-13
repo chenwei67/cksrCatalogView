@@ -54,33 +54,39 @@ func (rm *RollbackManager) ExecuteRollback() error {
 	return nil
 }
 
-// dropAllViews 删除所有视图
+// dropAllViews 删除StarRocks中的所有视图
 func (rm *RollbackManager) dropAllViews() error {
-	logger.Info("正在删除所有ClickHouse视图...")
-
-	// 获取所有视图名称
-	viewNames, err := rm.dbManager.GetClickHouseViewNames()
+	logger.Info("正在删除StarRocks视图...")
+	
+	srTableNames, err := rm.dbManager.GetStarRocksTableNames()
 	if err != nil {
-		return fmt.Errorf("获取视图列表失败: %w", err)
+		return fmt.Errorf("获取StarRocks表列表失败: %w", err)
 	}
 
-	if len(viewNames) == 0 {
-		logger.Info("没有找到需要删除的视图")
-		return nil
+	var srViewNames []string
+	for _, tableName := range srTableNames {
+		isView, err := rm.dbManager.CheckStarRocksTableIsView(tableName)
+		if err != nil {
+			logger.Warn("检查StarRocks表 %s 类型失败: %v，跳过", tableName, err)
+			continue
+		}
+		if isView {
+			srViewNames = append(srViewNames, tableName)
+		}
 	}
 
-	logger.Info("找到 %d 个视图需要删除", len(viewNames))
-
-	// 构建删除视图的SQL
-	viewBuilder := builder.NewViewRollbackBuilder("", rm.pair.ClickHouse.Database)
-	dropViewSQLs := viewBuilder.BuildDropAllViewsSQL(viewNames)
-
-	// 执行删除视图的SQL
-	if err := rm.dbManager.ExecuteRollbackSQL(dropViewSQLs, true); err != nil {
-		return fmt.Errorf("执行删除视图SQL失败: %w", err)
+	if len(srViewNames) > 0 {
+		logger.Info("找到 %d 个StarRocks视图需要删除", len(srViewNames))
+		srViewBuilder := builder.NewViewRollbackBuilder("", rm.pair.StarRocks.Database)
+		dropSRViewSQLs := srViewBuilder.BuildDropAllViewsSQL(srViewNames)
+		if err := rm.dbManager.ExecuteRollbackSQL(dropSRViewSQLs, false); err != nil {
+			return fmt.Errorf("执行删除StarRocks视图SQL失败: %w", err)
+		}
+		logger.Info("成功删除 %d 个StarRocks视图", len(srViewNames))
+	} else {
+		logger.Info("没有找到需要删除的StarRocks视图")
 	}
 
-	logger.Info("成功删除 %d 个视图", len(viewNames))
 	return nil
 }
 
@@ -174,6 +180,8 @@ func (rm *RollbackManager) removeSRTableSuffix() error {
 
 	// 过滤出带有后缀的表
 	var tablesWithSuffix []string
+	var conflictTables []string // 记录可能冲突的表名
+	
 	for _, tableName := range tableNames {
 		if strings.HasSuffix(tableName, suffix) {
 			// 检查表是否为VIEW
@@ -201,6 +209,15 @@ func (rm *RollbackManager) removeSRTableSuffix() error {
 			}
 
 			tablesWithSuffix = append(tablesWithSuffix, tableName)
+			
+			// 检查去掉后缀后的表名是否已存在
+			originalTableName := strings.TrimSuffix(tableName, suffix)
+			for _, existingTable := range tableNames {
+				if existingTable == originalTableName {
+					conflictTables = append(conflictTables, originalTableName)
+					break
+				}
+			}
 		}
 	}
 
@@ -210,6 +227,11 @@ func (rm *RollbackManager) removeSRTableSuffix() error {
 	}
 
 	logger.Info("找到 %d 个表需要去掉后缀 '%s'", len(tablesWithSuffix), suffix)
+
+	// 如果有冲突的表，先删除它们
+	if len(conflictTables) > 0 {
+		return fmt.Errorf("发现表名冲突，无法执行回退操作。冲突的表: %v。请手动处理这些冲突后再执行回退", conflictTables)
+	}
 
 	// 构建重命名表的SQL
 	tableBuilder := builder.NewTableRollbackBuilder(rm.pair.StarRocks.Database)
