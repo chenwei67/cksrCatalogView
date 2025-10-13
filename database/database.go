@@ -494,3 +494,156 @@ func (dm *DatabasePairManager) AddSyncFromCKColumnToAllTables() error {
 
 	return nil
 }
+
+// GetClickHouseViewNames 获取ClickHouse数据库中所有视图名称
+func (dm *DatabasePairManager) GetClickHouseViewNames() ([]string, error) {
+	db, err := dm.GetClickHouseConnection()
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	pair := dm.config.DatabasePairs[dm.pairIndex]
+	
+	// 查询所有视图
+	query := `
+		SELECT name 
+		FROM system.tables 
+		WHERE database = ? AND engine = 'View'
+		ORDER BY name
+	`
+	
+	rows, err := db.Query(query, pair.ClickHouse.Database)
+	if err != nil {
+		return nil, fmt.Errorf("查询ClickHouse视图列表失败: %w", err)
+	}
+	defer rows.Close()
+
+	var viewNames []string
+	for rows.Next() {
+		var viewName string
+		if err := rows.Scan(&viewName); err != nil {
+			return nil, fmt.Errorf("扫描视图名称失败: %w", err)
+		}
+		viewNames = append(viewNames, viewName)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历视图列表失败: %w", err)
+	}
+
+	logger.Debug("获取到 %d 个ClickHouse视图", len(viewNames))
+	return viewNames, nil
+}
+
+// GetClickHouseTableColumns 获取ClickHouse表的所有列信息
+func (dm *DatabasePairManager) GetClickHouseTableColumns(tableName string) ([]string, error) {
+	db, err := dm.GetClickHouseConnection()
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	pair := dm.config.DatabasePairs[dm.pairIndex]
+	
+	// 查询表的所有列
+	query := `
+		SELECT name 
+		FROM system.columns 
+		WHERE database = ? AND table = ?
+		ORDER BY position
+	`
+	
+	rows, err := db.Query(query, pair.ClickHouse.Database, tableName)
+	if err != nil {
+		return nil, fmt.Errorf("查询ClickHouse表 %s 列信息失败: %w", tableName, err)
+	}
+	defer rows.Close()
+
+	var columnNames []string
+	for rows.Next() {
+		var columnName string
+		if err := rows.Scan(&columnName); err != nil {
+			return nil, fmt.Errorf("扫描列名称失败: %w", err)
+		}
+		columnNames = append(columnNames, columnName)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历列列表失败: %w", err)
+	}
+
+	logger.Debug("获取到表 %s 的 %d 个列", tableName, len(columnNames))
+	return columnNames, nil
+}
+
+// GetStarRocksTableColumns 获取StarRocks表的所有列信息
+func (dm *DatabasePairManager) GetStarRocksTableColumns(tableName string) ([]string, error) {
+	db, err := dm.GetStarRocksConnection()
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	pair := dm.config.DatabasePairs[dm.pairIndex]
+	
+	// 查询表的所有列
+	query := `
+		SELECT COLUMN_NAME 
+		FROM information_schema.COLUMNS 
+		WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+		ORDER BY ORDINAL_POSITION
+	`
+	
+	rows, err := db.Query(query, pair.StarRocks.Database, tableName)
+	if err != nil {
+		return nil, fmt.Errorf("查询StarRocks表 %s 列信息失败: %w", tableName, err)
+	}
+	defer rows.Close()
+
+	var columnNames []string
+	for rows.Next() {
+		var columnName string
+		if err := rows.Scan(&columnName); err != nil {
+			return nil, fmt.Errorf("扫描列名称失败: %w", err)
+		}
+		columnNames = append(columnNames, columnName)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历列列表失败: %w", err)
+	}
+
+	logger.Debug("获取到表 %s 的 %d 个列", tableName, len(columnNames))
+	return columnNames, nil
+}
+
+// ExecuteRollbackSQL 执行回退SQL语句
+func (dm *DatabasePairManager) ExecuteRollbackSQL(sqlStatements []string, isClickHouse bool) error {
+	logger.Info("开始执行回退SQL，共 %d 条语句", len(sqlStatements))
+	
+	for i, sql := range sqlStatements {
+		if strings.TrimSpace(sql) == "" {
+			continue
+		}
+		
+		logger.Debug("[%d/%d] 执行回退SQL: %s", i+1, len(sqlStatements), sql)
+		
+		var err error
+		if isClickHouse {
+			err = dm.ExecuteClickHouseSQL(sql)
+		} else {
+			err = dm.ExecuteStarRocksSQL(sql)
+		}
+		
+		if err != nil {
+			logger.Error("执行回退SQL失败: %s, 错误: %v", sql, err)
+			return fmt.Errorf("执行回退SQL失败: %w", err)
+		}
+		
+		logger.Debug("[%d/%d] 回退SQL执行成功", i+1, len(sqlStatements))
+	}
+	
+	logger.Info("所有回退SQL执行完成")
+	return nil
+}

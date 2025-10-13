@@ -20,10 +20,12 @@ import (
 func main() {
 	var configPath string
 	var logLevel string
+	var rollback bool
 
 	// 定义命令行参数
 	flag.StringVar(&configPath, "config", "", "配置文件路径")
 	flag.StringVar(&logLevel, "log-level", "INFO", "日志级别 (SILENT, ERROR, WARN, INFO, DEBUG)")
+	flag.BoolVar(&rollback, "rollback", false, "执行回退操作：删除所有视图、删除SR表新增列、去掉SR表后缀、删除CK表带后缀的列")
 	flag.Parse()
 
 	// 检查环境变量LOG_LEVEL，如果设置了则优先使用
@@ -73,6 +75,16 @@ func main() {
 
 	// 确保程序退出时关闭日志文件
 	defer logger.CloseLogFile()
+
+	// 如果是回退模式，执行回退操作
+	if rollback {
+		logger.Info("开始执行回退操作...")
+		if err := ExecuteRollbackForAllPairs(cfg); err != nil {
+			log.Fatalf("回退操作失败: %v", err)
+		}
+		log.Println("回退操作完成")
+		return
+	}
 
 	// 处理多个数据库对
 	for i, pair := range cfg.DatabasePairs {
