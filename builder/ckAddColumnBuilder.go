@@ -41,8 +41,8 @@ func (c CKAddColumnBuilder) Build() string {
 		logger.Debug("CKAddColumnBuilder.Build() 字段 %s 构建结果: %s", c.converter.Name, result)
 		return result
 	} else if IsIPV6(_type) {
-		logger.Debug("CKAddColumnBuilder.Build() 字段 %s 识别为IPv6类型，使用 uint128Alias + aliasReinterpretAsUInt128", c.converter.Name)
-		result := c.buildAddLine(c.uint128Alias, c.aliasReinterpretAsUInt128)
+		logger.Debug("CKAddColumnBuilder.Build() 字段 %s 识别为IPv6类型，使用 int128Alias + aliasReinterpretAsUInt128", c.converter.Name)
+		result := c.buildAddLine(c.int128Alias, c.aliasReinterpretAsInt128)
 		logger.Debug("CKAddColumnBuilder.Build() 字段 %s 构建结果: %s", c.converter.Name, result)
 		return result
 	} else if IsIPV4(_type) {
@@ -95,16 +95,16 @@ func (c CKAddColumnBuilder) uint32Alias(name, remain string) string {
 	return fmt.Sprintf("%s UInt32 ALIAS %s", name, remain)
 }
 
-func (c CKAddColumnBuilder) uint128Alias(name, remain string) string {
-	return fmt.Sprintf("%s UInt128 ALIAS %s", name, remain)
+func (c CKAddColumnBuilder) int128Alias(name, remain string) string {
+	return fmt.Sprintf("%s Int128 ALIAS %s", name, remain)
 }
 
 func (c CKAddColumnBuilder) aliasToUInt32(name string) string {
 	return fmt.Sprintf("toUInt32(%s)", name)
 }
 
-func (c CKAddColumnBuilder) aliasReinterpretAsUInt128(name string) string {
-	return fmt.Sprintf("reinterpretAsUInt128(reverse(reinterpretAsFixedString(%s))) - - toUInt128('170141183460469231731687303715884105728')", name)
+func (c CKAddColumnBuilder) aliasReinterpretAsInt128(name string) string {
+	return fmt.Sprintf("reinterpretAsUInt128(reverse(reinterpretAsFixedString(%s))) - toUInt128('170141183460469231731687303715884105728')", name)
 }
 
 func (c CKAddColumnBuilder) aliasArrayIPV6StringConcat(arrayName string) string {

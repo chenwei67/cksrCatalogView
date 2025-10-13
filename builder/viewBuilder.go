@@ -38,7 +38,7 @@ type SRField struct {
 }
 
 func (sf *SRField) GenClause() {
-	sf.Clause = sf.Field.Name
+	sf.Clause = fmt.Sprintf("`%s`", sf.Field.Name)
 }
 
 type TableBuilder struct {
@@ -341,22 +341,22 @@ func (f *CKField) GenClause() {
 	} else if IsArray(f.originType()) {
 		f.Clause = f.ArrayMap()
 	} else if f.IsAddedColumn() {
-		f.Clause = fmt.Sprintf("%s as %s", f.Name, f.SRField.Name)
+		f.Clause = fmt.Sprintf("`%s` as `%s`", f.Name, f.SRField.Name)
 	} else {
-		f.Clause = f.Name
+		f.Clause = fmt.Sprintf("`%s`", f.Name)
 	}
 }
 
 func (f *CKField) ArrayMap() string {
-	return fmt.Sprintf("CASE \n\t\tWHEN %s = '' THEN %s[]\n\t\tELSE array_map(x -> CAST(x AS %s), split(%s, 'CKTOSRFRAGEMENT'))\n\tEND as %s", f.Name, f.SRField.Type, f.SRBasicType(), f.Name, f.SRField.Name)
+	return fmt.Sprintf("CASE \n\t\tWHEN `%s` = '' THEN %s[]\n\t\tELSE array_map(x -> CAST(x AS %s), split(`%s`, 'CKTOSRFRAGEMENT'))\n\tEND as `%s`", f.Name, f.SRField.Type, f.SRBasicType(), f.Name, f.SRField.Name)
 }
 
 func (f *CKField) Array() string {
-	return fmt.Sprintf("CASE \n\t\tWHEN %s = '' THEN ARRAY<String>[]\n\t\tELSE split(%s, 'CKTOSRFRAGEMENT')\n\tEND as %s", f.Name, f.Name, f.SRField.Name)
+	return fmt.Sprintf("CASE \n\t\tWHEN `%s` = '' THEN ARRAY<String>[]\n\t\tELSE split(`%s`, 'CKTOSRFRAGEMENT')\n\tEND as `%s`", f.Name, f.Name, f.SRField.Name)
 }
 
 func (f *CKField) ArrayIPV6() string {
-	return fmt.Sprintf("CASE \n\t\tWHEN %s = '' THEN ARRAY<LARGEINT>[]\n\t\tELSE array_map(x -> CAST(x AS LARGEINT), split(%s, 'CKTOSRFRAGEMENT'))\n\tEND as %s", f.Name, f.Name, f.SRField.Name)
+	return fmt.Sprintf("CASE \n\t\tWHEN `%s` = '' THEN ARRAY<LARGEINT>[]\n\t\tELSE array_map(x -> CAST(x AS LARGEINT), split(`%s`, 'CKTOSRFRAGEMENT'))\n\tEND as `%s`", f.Name, f.Name, f.SRField.Name)
 }
 
 func (f *CKField) SRBasicType() string {
