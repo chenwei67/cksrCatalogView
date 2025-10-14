@@ -124,6 +124,7 @@ func (rm *RollbackManager) dropSRAddedColumns() error {
 
 		// 构建删除列的SQL
 		var dropColumnSQLs []string
+		var dropIndexSQLs []string
 		rollbackBuilder := builder.NewRollbackBuilder(rm.pair.StarRocks.Database, tableName)
 
 		for _, columnName := range columnNames {
@@ -133,6 +134,31 @@ func (rm *RollbackManager) dropSRAddedColumns() error {
 				if sql != "" {
 					dropColumnSQLs = append(dropColumnSQLs, sql)
 				}
+			}
+		}
+
+		// 获取表的索引信息并删除syncFromCK相关的索引
+		indexNames, err := rm.dbManager.GetStarRocksTableIndexes(tableName)
+		if err != nil {
+			logger.Warn("获取表 %s 索引信息失败: %v，跳过索引删除", tableName, err)
+		} else {
+			for _, indexName := range indexNames {
+				// 检查是否是syncFromCK相关的索引
+				if strings.Contains(strings.ToLower(indexName), "syncfromck") {
+					sql := rollbackBuilder.BuildDropSRIndexSQL(indexName)
+					if sql != "" {
+						dropIndexSQLs = append(dropIndexSQLs, sql)
+					}
+				}
+			}
+		}
+
+		// 先执行删除索引的SQL
+		if len(dropIndexSQLs) > 0 {
+			logger.Debug("表 %s 需要删除 %d 个索引", tableName, len(dropIndexSQLs))
+			if err := rm.dbManager.ExecuteRollbackSQL(dropIndexSQLs, false); err != nil {
+				logger.Error("删除表 %s 的索引失败: %v", tableName, err)
+				continue
 			}
 		}
 

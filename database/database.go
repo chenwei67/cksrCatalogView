@@ -280,6 +280,47 @@ func (dm *DatabasePairManager) CreateStarRocksCatalog(catalogName string) error 
 	return dm.ExecuteStarRocksSQL(createCatalogSQL)
 }
 
+// ExecuteBatchSQLWithRetry 批量执行SQL语句，支持重试机制
+func (dm *DatabasePairManager) ExecuteBatchSQLWithRetry(sqlStatements []string, isClickHouse bool, maxRetries int, retryDelay time.Duration) error {
+	for i, sql := range sqlStatements {
+		sql = strings.TrimSpace(sql)
+		if sql == "" {
+			continue
+		}
+
+		// 对每个SQL语句进行重试
+		var lastErr error
+		for attempt := 1; attempt <= maxRetries; attempt++ {
+			logger.Debug("执行SQL语句 [%d/%d]，第 %d 次尝试: %s", i+1, len(sqlStatements), attempt, sql)
+			
+			var err error
+			if isClickHouse {
+				err = dm.ExecuteClickHouseSQL(sql)
+			} else {
+				err = dm.ExecuteStarRocksSQL(sql)
+			}
+
+			if err == nil {
+				logger.Debug("SQL语句 [%d/%d] 执行成功", i+1, len(sqlStatements))
+				break
+			}
+
+			lastErr = err
+			if attempt < maxRetries {
+				logger.Warn("SQL语句 [%d/%d] 第 %d 次执行失败，%v 秒后重试: %v", i+1, len(sqlStatements), attempt, retryDelay.Seconds(), err)
+				time.Sleep(retryDelay)
+			} else {
+				logger.Error("SQL语句 [%d/%d] 经过 %d 次重试后仍然失败: %v", i+1, len(sqlStatements), maxRetries, err)
+			}
+		}
+
+		if lastErr != nil {
+			return fmt.Errorf("执行SQL失败 (经过 %d 次重试): %s, 错误: %w", maxRetries, sql, lastErr)
+		}
+	}
+	return nil
+}
+
 // ExecuteBatchSQL 批量执行SQL语句
 func (dm *DatabasePairManager) ExecuteBatchSQL(sqlStatements []string, isClickHouse bool) error {
 	for _, sql := range sqlStatements {
@@ -720,6 +761,49 @@ func (dm *DatabasePairManager) GetStarRocksTableColumns(tableName string) ([]str
 
 	logger.Debug("获取到表 %s 的 %d 个列", tableName, len(columnNames))
 	return columnNames, nil
+}
+
+// GetStarRocksTableIndexes 获取StarRocks表的所有索引名称
+func (dm *DatabasePairManager) GetStarRocksTableIndexes(tableName string) ([]string, error) {
+	db, err := dm.GetStarRocksConnection()
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	pair := dm.config.DatabasePairs[dm.pairIndex]
+
+	// 使用information_schema查询表的所有索引
+	query := `
+		SELECT DISTINCT index_name 
+		FROM information_schema.statistics 
+		WHERE table_schema = ? 
+		AND table_name = ?
+		AND index_name != 'PRIMARY'
+	`
+
+	rows, err := db.Query(query, pair.StarRocks.Database, tableName)
+	if err != nil {
+		return nil, fmt.Errorf("查询表 %s.%s 的索引失败: %w", 
+			pair.StarRocks.Database, tableName, err)
+	}
+	defer rows.Close()
+
+	var indexNames []string
+	for rows.Next() {
+		var indexName string
+		if err := rows.Scan(&indexName); err != nil {
+			return nil, fmt.Errorf("读取索引名称失败: %w", err)
+		}
+		indexNames = append(indexNames, indexName)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历索引结果失败: %w", err)
+	}
+
+	logger.Debug("获取到表 %s 的 %d 个索引", tableName, len(indexNames))
+	return indexNames, nil
 }
 
 // ExecuteRollbackSQL 执行回退SQL语句

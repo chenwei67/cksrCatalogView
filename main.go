@@ -338,12 +338,17 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 		return fmt.Errorf("执行ALTER TABLE语句失败: %w", err)
 	}
 
+	// 等待ALTER TABLE操作完成，给StarRocks时间更新元数据
+	logger.Debug("等待StarRocks元数据更新...")
+	time.Sleep(time.Second * 5)
+
 	logger.Debug("准备执行 %d 个CREATE VIEW语句", len(viewSQLs))
 	for i, viewSQL := range viewSQLs {
 		logger.Debug("VIEW SQL #%d:\n%s", i+1, viewSQL)
 	}
 	logger.Info("正在执行CREATE VIEW语句...")
-	if err := dbPairManager.ExecuteBatchSQL(viewSQLs, false); err != nil {
+	// 使用重试机制执行CREATE VIEW语句，因为依赖于ALTER TABLE后的元数据更新
+	if err := dbPairManager.ExecuteBatchSQLWithRetry(viewSQLs, false, 20, time.Second*3); err != nil {
 		logger.Error("执行CREATE VIEW语句失败: %v", err)
 		return fmt.Errorf("执行CREATE VIEW语句失败: %w", err)
 	}

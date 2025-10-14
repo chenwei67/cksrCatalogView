@@ -46,6 +46,14 @@ func (r RollbackBuilder) BuildDropSRColumnSQL(columnName string) string {
 	return sql
 }
 
+// BuildDropSRIndexSQL 构建删除StarRocks表中索引的SQL
+func (r RollbackBuilder) BuildDropSRIndexSQL(indexName string) string {
+	logger.Debug("RollbackBuilder.BuildDropSRIndexSQL() 构建删除SR索引SQL: %s.%s.%s", r.dbName, r.tableName, indexName)
+	sql := fmt.Sprintf("ALTER TABLE `%s`.`%s` DROP INDEX `%s`", r.dbName, r.tableName, indexName)
+	logger.Debug("RollbackBuilder.BuildDropSRIndexSQL() 生成SQL: %s", sql)
+	return sql
+}
+
 // BuildRenameSRTableSQL 构建重命名StarRocks表的SQL（去掉后缀）
 func (r RollbackBuilder) BuildRenameSRTableSQL(suffix string) string {
 	if !strings.HasSuffix(r.tableName, suffix) {
