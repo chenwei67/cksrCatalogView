@@ -9,18 +9,18 @@
 package database
 
 import (
-	"database/sql"
-	"fmt"
-	"log"
-	"strings"
-	"time"
+    "database/sql"
+    "fmt"
+    "log"
+    "strings"
+    "time"
 
-	"cksr/builder"
-	"cksr/config"
-	"cksr/logger"
+    "cksr/builder"
+    "cksr/config"
+    "cksr/logger"
 
-	_ "github.com/ClickHouse/clickhouse-go"
-	_ "github.com/go-sql-driver/mysql"
+    _ "github.com/ClickHouse/clickhouse-go"
+    _ "github.com/go-sql-driver/mysql"
 )
 
 // DatabasePairManager 数据库对管理器
@@ -222,14 +222,24 @@ func (dm *DatabasePairManager) ExportStarRocksTables() (map[string]string, error
 
 // ExecuteClickHouseSQL 执行ClickHouse SQL
 func (dm *DatabasePairManager) ExecuteClickHouseSQL(sql string) error {
-	db, err := dm.GetClickHouseConnection()
-	if err != nil {
-		return err
-	}
-	defer db.Close()
+    db, err := dm.GetClickHouseConnection()
+    if err != nil {
+        return err
+    }
+    defer db.Close()
 
-	_, err = db.Exec(sql)
-	return err
+    // 增加分布式 DDL 超时时间，避免 ON CLUSTER 任务因超时而提前返回错误
+    if _, setErr := db.Exec("SET distributed_ddl_task_timeout = 3600"); setErr != nil {
+        logger.Warn("设置 ClickHouse 分布式DDL超时失败: %v", setErr)
+    }
+
+    _, err = db.Exec(sql)
+    // 如果是分布式DDL超时（错误码 159），视为非致命错误，任务会在后台继续执行
+    if isDistributedDDLTimeout(err) {
+        logger.Warn("分布式DDL任务超过超时时间，后台继续执行: %v", err)
+        return nil
+    }
+    return err
 }
 
 // ExecuteStarRocksSQL 执行StarRocks SQL
@@ -282,11 +292,11 @@ func (dm *DatabasePairManager) CreateStarRocksCatalog(catalogName string) error 
 
 // ExecuteBatchSQLWithRetry 批量执行SQL语句，支持重试机制
 func (dm *DatabasePairManager) ExecuteBatchSQLWithRetry(sqlStatements []string, isClickHouse bool, maxRetries int, retryDelay time.Duration) error {
-	for i, sql := range sqlStatements {
-		sql = strings.TrimSpace(sql)
-		if sql == "" {
-			continue
-		}
+    for i, sql := range sqlStatements {
+        sql = strings.TrimSpace(sql)
+        if sql == "" {
+            continue
+        }
 
 		// 对每个SQL语句进行重试
 		var lastErr error
@@ -294,16 +304,15 @@ func (dm *DatabasePairManager) ExecuteBatchSQLWithRetry(sqlStatements []string, 
 			logger.Debug("执行SQL语句 [%d/%d]，第 %d 次尝试: %s", i+1, len(sqlStatements), attempt, sql)
 			
 			var err error
-			if isClickHouse {
-				err = dm.ExecuteClickHouseSQL(sql)
-			} else {
-				err = dm.ExecuteStarRocksSQL(sql)
-			}
-
-			if err == nil {
-				logger.Debug("SQL语句 [%d/%d] 执行成功", i+1, len(sqlStatements))
-				break
-			}
+            if isClickHouse {
+                err = dm.ExecuteClickHouseSQL(sql)
+            } else {
+                err = dm.ExecuteStarRocksSQL(sql)
+            }
+            if err == nil {
+                logger.Debug("SQL语句 [%d/%d] 执行成功", i+1, len(sqlStatements))
+                break
+            }
 
 			lastErr = err
 			if attempt < maxRetries {
@@ -312,35 +321,50 @@ func (dm *DatabasePairManager) ExecuteBatchSQLWithRetry(sqlStatements []string, 
 			} else {
 				logger.Error("SQL语句 [%d/%d] 经过 %d 次重试后仍然失败: %v", i+1, len(sqlStatements), maxRetries, err)
 			}
-		}
+        }
 
-		if lastErr != nil {
-			return fmt.Errorf("执行SQL失败 (经过 %d 次重试): %s, 错误: %w", maxRetries, sql, lastErr)
-		}
-	}
-	return nil
+        if lastErr != nil {
+            return fmt.Errorf("执行SQL失败 (经过 %d 次重试): %s, 错误: %w", maxRetries, sql, lastErr)
+        }
+    }
+    return nil
 }
 
 // ExecuteBatchSQL 批量执行SQL语句
 func (dm *DatabasePairManager) ExecuteBatchSQL(sqlStatements []string, isClickHouse bool) error {
-	for _, sql := range sqlStatements {
-		sql = strings.TrimSpace(sql)
-		if sql == "" {
-			continue
-		}
+    for _, sql := range sqlStatements {
+        sql = strings.TrimSpace(sql)
+        if sql == "" {
+            continue
+        }
 
-		var err error
-		if isClickHouse {
-			err = dm.ExecuteClickHouseSQL(sql)
-		} else {
-			err = dm.ExecuteStarRocksSQL(sql)
-		}
+        var err error
+        if isClickHouse {
+            err = dm.ExecuteClickHouseSQL(sql)
+        } else {
+            err = dm.ExecuteStarRocksSQL(sql)
+        }
 
-		if err != nil {
-			return fmt.Errorf("执行SQL失败: %s, 错误: %w", sql, err)
-		}
-	}
-	return nil
+        if err != nil {
+            return fmt.Errorf("执行SQL失败: %s, 错误: %w", sql, err)
+        }
+    }
+    return nil
+}
+
+// isDistributedDDLTimeout 判断是否为 ClickHouse 分布式 DDL 超时错误（错误码 159）
+func isDistributedDDLTimeout(err error) bool {
+    if err == nil {
+        return false
+    }
+    msg := strings.ToLower(err.Error())
+    if strings.Contains(msg, "distributed_ddl_task_timeout") {
+        return true
+    }
+    if strings.Contains(msg, "code: 159") {
+        return true
+    }
+    return false
 }
 
 // GetPairName 获取数据库对名称

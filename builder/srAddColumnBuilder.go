@@ -114,7 +114,7 @@ func (s *SRAddColumnBuilder) BuildIndexes() []string {
 			sql = fmt.Sprintf("CREATE UNIQUE INDEX `%s` ON `%s`.`%s` (`%s`)",
 				idx.IndexName, s.database, s.tableName, idx.ColumnName)
 		} else {
-			sql = fmt.Sprintf("CREATE INDEX `%s` ON `%s`.`%s` (`%s`)",
+			sql = fmt.Sprintf("CREATE INDEX `%s` ON `%s`.`%s` (`%s`) USING BITMAP;",
 				idx.IndexName, s.database, s.tableName, idx.ColumnName)
 		}
 		indexSQLs = append(indexSQLs, sql)
