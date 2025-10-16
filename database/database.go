@@ -367,6 +367,26 @@ func isDistributedDDLTimeout(err error) bool {
     return false
 }
 
+// isStarRocksSchemaChangeInProgress 判断StarRocks是否处于表结构变更进行中的错误
+// 该错误常见提示为："A schema change operation is in progress on the table ..."
+// 以及文档链接提示 SHOW_ALT（不同版本提示文本可能略有差异）
+func isStarRocksSchemaChangeInProgress(err error) bool {
+    if err == nil {
+        return false
+    }
+    msg := strings.ToLower(err.Error())
+    if strings.Contains(msg, "schema change operation is in progress") {
+        return true
+    }
+    if strings.Contains(msg, "show_alt") {
+        return true
+    }
+    if strings.Contains(msg, "error 1064") && strings.Contains(msg, "schema change") {
+        return true
+    }
+    return false
+}
+
 // GetPairName 获取数据库对名称
 func (dm *DatabasePairManager) GetPairName() string {
 	if dm.pairIndex >= len(dm.config.DatabasePairs) {
@@ -556,8 +576,26 @@ func (dm *DatabasePairManager) AddSyncFromCKColumnToTable(tableName string) erro
 	
 	// 第一步：添加字段
 	logger.Debug("执行字段添加SQL: %s", columnSQL)
-	if err := dm.ExecuteStarRocksSQL(columnSQL); err != nil {
-		return fmt.Errorf("为表 %s 添加字段失败: %w", tableName, err)
+	// 对于 SR 正在进行 schema change 的场景，持续重试，直到成功或字段已存在
+	retryDelayForSchema := time.Second * 5
+	for {
+		// 避免重复添加：每次尝试前都检查字段是否已存在
+		existsNow, checkErr := dm.CheckStarRocksColumnExists(tableName, "syncFromCK")
+		if checkErr == nil && existsNow {
+			logger.Debug("检测到字段 syncFromCK 已存在，跳过添加步骤")
+			break
+		}
+
+		if err := dm.ExecuteStarRocksSQL(columnSQL); err != nil {
+			if isStarRocksSchemaChangeInProgress(err) {
+				logger.Warn("表 %s 正在进行schema变更，%d秒后重试添加字段: %v", tableName, int(retryDelayForSchema.Seconds()), err)
+				time.Sleep(retryDelayForSchema)
+				continue
+			}
+			return fmt.Errorf("为表 %s 添加字段失败: %w", tableName, err)
+		}
+		// 执行成功，跳出循环
+		break
 	}
 	
 	// 等待DDL操作完成，给StarRocks时间更新元数据
@@ -567,7 +605,7 @@ func (dm *DatabasePairManager) AddSyncFromCKColumnToTable(tableName string) erro
 	// 第二步：验证字段是否成功添加（带重试机制）
 	logger.Debug("验证字段是否成功添加...")
 	var columnExists bool
-	maxRetries := 20
+	maxRetries := 1600
 	retryDelay := time.Second * 2
 	
 	for attempt := 1; attempt <= maxRetries; attempt++ {
@@ -617,11 +655,22 @@ func (dm *DatabasePairManager) AddSyncFromCKColumnToTable(tableName string) erro
 			}
 		}
 		
-		if err := dm.ExecuteStarRocksSQL(indexSQL); err != nil {
+		// 索引创建也可能受到正在进行的schema变更影响，这里对该错误做容忍并重试
+		for {
+			err := dm.ExecuteStarRocksSQL(indexSQL)
+			if err == nil {
+				break
+			}
 			// 如果是索引已存在的错误，记录警告但不中断流程
 			if strings.Contains(err.Error(), "Duplicate key name") || 
 			   strings.Contains(err.Error(), "already exists") {
 				logger.Warn("索引可能已存在，跳过: %v", err)
+				break
+			}
+
+			if isStarRocksSchemaChangeInProgress(err) {
+				logger.Warn("表 %s 存在schema变更进行中，延迟%ds后重试创建索引: %v", tableName, int(retryDelayForSchema.Seconds()), err)
+				time.Sleep(retryDelayForSchema)
 				continue
 			}
 			return fmt.Errorf("为表 %s 创建索引失败 [%d/%d]: %w", tableName, i+1, len(indexSQLs), err)

@@ -2,7 +2,7 @@
   "database_pairs": [
     {
       "name": "cold",
-      "catalog_name": "cw_cold_catalog",
+      "catalog_name": "cold_catalog",
       "sr_table_suffix": "_local_catalog",
       "clickhouse": {
         "host": "10.117.64.12",
@@ -13,11 +13,11 @@
         "database": "business"
       },
       "starrocks": {
-        "host": "10.107.29.99",
-        "port": 30938,
+        "host": "10.117.64.12",
+        "port": 32013,
         "username": "root",
-        "password": "",
-        "database": "cw0"
+        "password": "StarRocks!@2025#.",
+        "database": "business"
       }
     }
   ],
