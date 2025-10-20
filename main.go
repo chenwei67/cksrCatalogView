@@ -66,7 +66,7 @@ func main() {
 	if err := logger.InitFileLogging(cfg.Log.EnableFileLog, cfg.Log.LogFilePath, cfg.TempDir); err != nil {
 		log.Fatalf("初始化文件日志失败: %v", err)
 	}
-	
+
 	// 如果配置文件中指定了日志级别，则覆盖命令行参数
 	if cfg.Log.LogLevel != "" {
 		logger.SetLogLevel(logger.ParseLogLevel(cfg.Log.LogLevel))
@@ -115,8 +115,6 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 		return fmt.Errorf("导出ClickHouse表结构失败: %w", err)
 	}
 
-
-
 	// 2. 创建StarRocks Catalog（使用配置中指定的catalog名称）
 	logger.Info("正在创建StarRocks Catalog...")
 	catalogName := pair.CatalogName
@@ -157,17 +155,38 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 
 	// 找出共同的表（基于原始表名）
 	commonTables := []string{}
+	renamedTables := make(map[string]bool) // 记录哪些表已经重命名过了
 	for _, ckTableName := range ckTableNames {
 		// 检查表是否在忽略列表中
 		if ignoreTableMap[ckTableName] {
 			logger.Info("忽略表: %s (在配置的忽略列表中)", ckTableName)
 			continue
 		}
-		
-		// 检查是否为共同表
+
+		// 检查是否为共同表（原始表名匹配）
 		if srTableMap[ckTableName] {
 			commonTables = append(commonTables, ckTableName)
 			logger.Debug("找到共同表: %s", ckTableName)
+		} else {
+			// 检查是否存在已重命名但未创建视图的情况
+			// 场景：程序在重命名后、创建视图前中断，重启后需要继续处理
+			suffix := pair.SRTableSuffix
+			if suffix != "" {
+				renamedTableName := ckTableName + suffix
+				if srTableMap[renamedTableName] {
+					// 检查是否已存在对应的视图，如果不存在则需要处理
+					viewExists, err := dbPairManager.CheckStarRocksTableIsView(ckTableName)
+					if err != nil {
+						logger.Warn("检查视图 %s 是否存在失败: %v，跳过处理", ckTableName, err)
+						continue
+					}
+					if !viewExists {
+						commonTables = append(commonTables, ckTableName)
+						renamedTables[ckTableName] = true // 标记这个表已经重命名过了
+						logger.Info("发现已重命名但未创建视图的表: %s -> %s，加入处理队列", ckTableName, renamedTableName)
+					}
+				}
+			}
 		}
 	}
 
@@ -199,10 +218,18 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 		logger.Debug("ClickHouse表结构解析完成")
 
 		// 解析StarRocks表结构（直接获取DDL）
-		logger.Debug("正在获取StarRocks表DDL (表名: %s)...", tableName)
-		srDDL, err := dbPairManager.GetStarRocksTableDDL(tableName)
+		// 如果这个表已经在前面检测到重命名过了，直接使用重命名后的表名
+		actualSRTableName := tableName
+		if renamedTables[tableName] {
+			suffix := pair.SRTableSuffix
+			actualSRTableName = tableName + suffix
+			logger.Info("使用已知的重命名表名获取DDL: %s -> %s", tableName, actualSRTableName)
+		}
+		
+		logger.Debug("正在获取StarRocks表DDL (表名: %s)...", actualSRTableName)
+		srDDL, err := dbPairManager.GetStarRocksTableDDL(actualSRTableName)
 		if err != nil {
-			return fmt.Errorf("获取StarRocks表%s的DDL失败: %w", tableName, err)
+			return fmt.Errorf("获取StarRocks表%s的DDL失败: %w", actualSRTableName, err)
 		}
 		logger.Debug("StarRocks表DDL获取完成")
 
@@ -227,7 +254,7 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 			logger.Error("生成SQL语句失败: %v", err)
 			return fmt.Errorf("生成SQL语句失败: %w", err)
 		}
-		
+
 		if alterSQL != "" {
 			logger.Debug("执行ClickHouse ALTER TABLE语句: %s", alterSQL)
 			if err := dbPairManager.ExecuteBatchSQL([]string{alterSQL}, true); err != nil {
@@ -240,21 +267,26 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 		logger.Info("步骤2: 处理StarRocks表 %s 名称加后缀", tableName)
 		suffix := pair.SRTableSuffix
 		if suffix != "" && !strings.HasSuffix(tableName, suffix) {
-			// 检查表是否为native表
-			isNative, err := dbPairManager.CheckStarRocksTableIsNative(tableName)
-			if err != nil {
-				logger.Warn("检查表 %s 类型失败: %v，跳过重命名", tableName, err)
-			} else if isNative {
-				newTableName := tableName + suffix
-				renameSQL := fmt.Sprintf("ALTER TABLE `%s`.`%s` RENAME `%s`",
-					pair.StarRocks.Database, tableName, newTableName)
-				logger.Debug("执行StarRocks RENAME语句: %s", renameSQL)
-				if err := dbPairManager.ExecuteStarRocksSQL(renameSQL); err != nil {
-					logger.Error("执行StarRocks RENAME语句失败: %v", err)
-					return fmt.Errorf("执行StarRocks RENAME语句失败: %w", err)
-				}
+			// 如果这个表已经在前面检测到重命名过了，直接跳过
+			if renamedTables[tableName] {
+				logger.Info("表 %s 已经重命名过了，跳过重命名步骤", tableName)
 			} else {
-				logger.Debug("跳过非native表: %s (不支持ALTER TABLE RENAME操作)", tableName)
+				// 检查表是否为native表
+				isNative, err := dbPairManager.CheckStarRocksTableIsNative(tableName)
+				if err != nil {
+					logger.Warn("检查表 %s 类型失败: %v，跳过重命名", tableName, err)
+				} else if isNative {
+					newTableName := tableName + suffix
+					renameSQL := fmt.Sprintf("ALTER TABLE `%s`.`%s` RENAME `%s`",
+						pair.StarRocks.Database, tableName, newTableName)
+					logger.Debug("执行StarRocks RENAME语句: %s", renameSQL)
+					if err := dbPairManager.ExecuteStarRocksSQL(renameSQL); err != nil {
+						logger.Error("执行StarRocks RENAME语句失败: %v", err)
+						return fmt.Errorf("执行StarRocks RENAME语句失败: %w", err)
+					}
+				} else {
+					logger.Debug("跳过非native表: %s (不支持ALTER TABLE RENAME操作)", tableName)
+				}
 			}
 		}
 
@@ -367,7 +399,7 @@ func run(ckTable, srTable parser.Table, catalogName string) (string, string, err
 	logger.Debug("开始生成ALTER SQL...")
 	alterSql := alterBuilder.Build()
 	logger.Debug("ALTER SQL生成完成，长度: %d", len(alterSql))
-	
+
 	// 添加完整ALTER SQL语句的调试输出
 	if alterSql != "" {
 		logger.Debug("=== 完整ALTER SQL语句 ===")
@@ -385,7 +417,7 @@ func run(ckTable, srTable parser.Table, catalogName string) (string, string, err
 		return "", "", fmt.Errorf("failed to build view: %w", err)
 	}
 	logger.Debug("VIEW SQL生成完成，长度: %d", len(view))
-	
+
 	// 添加完整VIEW SQL语句的调试输出
 	if view != "" {
 		logger.Debug("=== 完整VIEW SQL语句 ===")

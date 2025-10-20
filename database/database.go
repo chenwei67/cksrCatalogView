@@ -9,18 +9,17 @@
 package database
 
 import (
-    "database/sql"
-    "fmt"
-    "log"
-    "strings"
-    "time"
+	"database/sql"
+	"fmt"
+	"log"
+	"strings"
+	"time"
 
-    "cksr/builder"
-    "cksr/config"
-    "cksr/logger"
+	"cksr/config"
+	"cksr/logger"
 
-    _ "github.com/ClickHouse/clickhouse-go"
-    _ "github.com/go-sql-driver/mysql"
+	_ "github.com/ClickHouse/clickhouse-go"
+	_ "github.com/go-sql-driver/mysql"
 )
 
 // DatabasePairManager 数据库对管理器
@@ -175,7 +174,7 @@ func (dm *DatabasePairManager) GetStarRocksTableDDL(tableName string) (string, e
 	defer rows.Close()
 
 	logger.Debug("查询执行完成，正在读取结果...")
-	
+
 	// 读取结果
 	var table, createStatement string
 	if rows.Next() {
@@ -190,24 +189,24 @@ func (dm *DatabasePairManager) GetStarRocksTableDDL(tableName string) (string, e
 
 // ExecuteClickHouseSQL 执行ClickHouse SQL
 func (dm *DatabasePairManager) ExecuteClickHouseSQL(sql string) error {
-    db, err := dm.GetClickHouseConnection()
-    if err != nil {
-        return err
-    }
-    defer db.Close()
+	db, err := dm.GetClickHouseConnection()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
 
-    // 增加分布式 DDL 超时时间，避免 ON CLUSTER 任务因超时而提前返回错误
-    if _, setErr := db.Exec("SET distributed_ddl_task_timeout = 3600"); setErr != nil {
-        logger.Warn("设置 ClickHouse 分布式DDL超时失败: %v", setErr)
-    }
+	// 增加分布式 DDL 超时时间，避免 ON CLUSTER 任务因超时而提前返回错误
+	if _, setErr := db.Exec("SET distributed_ddl_task_timeout = 3600"); setErr != nil {
+		logger.Warn("设置 ClickHouse 分布式DDL超时失败: %v", setErr)
+	}
 
-    _, err = db.Exec(sql)
-    // 如果是分布式DDL超时（错误码 159），视为非致命错误，任务会在后台继续执行
-    if isDistributedDDLTimeout(err) {
-        logger.Warn("分布式DDL任务超过超时时间，后台继续执行: %v", err)
-        return nil
-    }
-    return err
+	_, err = db.Exec(sql)
+	// 如果是分布式DDL超时（错误码 159），视为非致命错误，任务会在后台继续执行
+	if isDistributedDDLTimeout(err) {
+		logger.Warn("分布式DDL任务超过超时时间，后台继续执行: %v", err)
+		return nil
+	}
+	return err
 }
 
 // ExecuteStarRocksSQL 执行StarRocks SQL
@@ -260,27 +259,27 @@ func (dm *DatabasePairManager) CreateStarRocksCatalog(catalogName string) error 
 
 // ExecuteBatchSQLWithRetry 批量执行SQL语句，支持重试机制
 func (dm *DatabasePairManager) ExecuteBatchSQLWithRetry(sqlStatements []string, isClickHouse bool, maxRetries int, retryDelay time.Duration) error {
-    for i, sql := range sqlStatements {
-        sql = strings.TrimSpace(sql)
-        if sql == "" {
-            continue
-        }
+	for i, sql := range sqlStatements {
+		sql = strings.TrimSpace(sql)
+		if sql == "" {
+			continue
+		}
 
 		// 对每个SQL语句进行重试
 		var lastErr error
 		for attempt := 1; attempt <= maxRetries; attempt++ {
 			logger.Debug("执行SQL语句 [%d/%d]，第 %d 次尝试: %s", i+1, len(sqlStatements), attempt, sql)
-			
+
 			var err error
-            if isClickHouse {
-                err = dm.ExecuteClickHouseSQL(sql)
-            } else {
-                err = dm.ExecuteStarRocksSQL(sql)
-            }
-            if err == nil {
-                logger.Debug("SQL语句 [%d/%d] 执行成功", i+1, len(sqlStatements))
-                break
-            }
+			if isClickHouse {
+				err = dm.ExecuteClickHouseSQL(sql)
+			} else {
+				err = dm.ExecuteStarRocksSQL(sql)
+			}
+			if err == nil {
+				logger.Debug("SQL语句 [%d/%d] 执行成功", i+1, len(sqlStatements))
+				break
+			}
 
 			lastErr = err
 			if attempt < maxRetries {
@@ -289,70 +288,70 @@ func (dm *DatabasePairManager) ExecuteBatchSQLWithRetry(sqlStatements []string, 
 			} else {
 				logger.Error("SQL语句 [%d/%d] 经过 %d 次重试后仍然失败: %v", i+1, len(sqlStatements), maxRetries, err)
 			}
-        }
+		}
 
-        if lastErr != nil {
-            return fmt.Errorf("执行SQL失败 (经过 %d 次重试): %s, 错误: %w", maxRetries, sql, lastErr)
-        }
-    }
-    return nil
+		if lastErr != nil {
+			return fmt.Errorf("执行SQL失败 (经过 %d 次重试): %s, 错误: %w", maxRetries, sql, lastErr)
+		}
+	}
+	return nil
 }
 
 // ExecuteBatchSQL 批量执行SQL语句
 func (dm *DatabasePairManager) ExecuteBatchSQL(sqlStatements []string, isClickHouse bool) error {
-    for _, sql := range sqlStatements {
-        sql = strings.TrimSpace(sql)
-        if sql == "" {
-            continue
-        }
+	for _, sql := range sqlStatements {
+		sql = strings.TrimSpace(sql)
+		if sql == "" {
+			continue
+		}
 
-        var err error
-        if isClickHouse {
-            err = dm.ExecuteClickHouseSQL(sql)
-        } else {
-            err = dm.ExecuteStarRocksSQL(sql)
-        }
+		var err error
+		if isClickHouse {
+			err = dm.ExecuteClickHouseSQL(sql)
+		} else {
+			err = dm.ExecuteStarRocksSQL(sql)
+		}
 
-        if err != nil {
-            return fmt.Errorf("执行SQL失败: %s, 错误: %w", sql, err)
-        }
-    }
-    return nil
+		if err != nil {
+			return fmt.Errorf("执行SQL失败: %s, 错误: %w", sql, err)
+		}
+	}
+	return nil
 }
 
 // isDistributedDDLTimeout 判断是否为 ClickHouse 分布式 DDL 超时错误（错误码 159）
 func isDistributedDDLTimeout(err error) bool {
-    if err == nil {
-        return false
-    }
-    msg := strings.ToLower(err.Error())
-    if strings.Contains(msg, "distributed_ddl_task_timeout") {
-        return true
-    }
-    if strings.Contains(msg, "code: 159") {
-        return true
-    }
-    return false
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "distributed_ddl_task_timeout") {
+		return true
+	}
+	if strings.Contains(msg, "code: 159") {
+		return true
+	}
+	return false
 }
 
 // isStarRocksSchemaChangeInProgress 判断StarRocks是否处于表结构变更进行中的错误
 // 该错误常见提示为："A schema change operation is in progress on the table ..."
 // 以及文档链接提示 SHOW_ALT（不同版本提示文本可能略有差异）
 func isStarRocksSchemaChangeInProgress(err error) bool {
-    if err == nil {
-        return false
-    }
-    msg := strings.ToLower(err.Error())
-    if strings.Contains(msg, "schema change operation is in progress") {
-        return true
-    }
-    if strings.Contains(msg, "show_alt") {
-        return true
-    }
-    if strings.Contains(msg, "error 1064") && strings.Contains(msg, "schema change") {
-        return true
-    }
-    return false
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "schema change operation is in progress") {
+		return true
+	}
+	if strings.Contains(msg, "show_alt") {
+		return true
+	}
+	if strings.Contains(msg, "error 1064") && strings.Contains(msg, "schema change") {
+		return true
+	}
+	return false
 }
 
 // GetPairName 获取数据库对名称
@@ -390,7 +389,7 @@ func (dm *DatabasePairManager) CheckStarRocksColumnExists(tableName, columnName 
 	var count int
 	err = db.QueryRow(query, pair.StarRocks.Database, tableName, columnName).Scan(&count)
 	if err != nil {
-		return false, fmt.Errorf("检查字段 %s.%s.%s 是否存在失败: %w", 
+		return false, fmt.Errorf("检查字段 %s.%s.%s 是否存在失败: %w",
 			pair.StarRocks.Database, tableName, columnName, err)
 	}
 
@@ -418,7 +417,7 @@ func (dm *DatabasePairManager) CheckStarRocksTableIsNative(tableName string) (bo
 	var tableType string
 	err = db.QueryRow(query, pair.StarRocks.Database, tableName).Scan(&tableType)
 	if err != nil {
-		return false, fmt.Errorf("检查表 %s.%s 类型失败: %w", 
+		return false, fmt.Errorf("检查表 %s.%s 类型失败: %w",
 			pair.StarRocks.Database, tableName, err)
 	}
 
@@ -451,7 +450,7 @@ func (dm *DatabasePairManager) CheckStarRocksTableIsView(tableName string) (bool
 	var tableType string
 	err = db.QueryRow(query, pair.StarRocks.Database, tableName).Scan(&tableType)
 	if err != nil {
-		return false, fmt.Errorf("检查表 %s.%s 类型失败: %w", 
+		return false, fmt.Errorf("检查表 %s.%s 类型失败: %w",
 			pair.StarRocks.Database, tableName, err)
 	}
 
@@ -459,6 +458,33 @@ func (dm *DatabasePairManager) CheckStarRocksTableIsView(tableName string) (bool
 	return strings.ToUpper(tableType) == "VIEW", nil
 }
 
+// CheckStarRocksTableExists 检查StarRocks表是否存在
+func (dm *DatabasePairManager) CheckStarRocksTableExists(tableName string) (bool, error) {
+	db, err := dm.GetStarRocksConnection()
+	if err != nil {
+		return false, err
+	}
+	defer db.Close()
+
+	pair := dm.config.DatabasePairs[dm.pairIndex]
+
+	// 使用information_schema.tables查询表是否存在
+	query := `
+		SELECT COUNT(*) 
+		FROM information_schema.tables 
+		WHERE table_schema = ? 
+		AND table_name = ?
+	`
+
+	var count int
+	err = db.QueryRow(query, pair.StarRocks.Database, tableName).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("检查表 %s.%s 是否存在失败: %w",
+			pair.StarRocks.Database, tableName, err)
+	}
+
+	return count > 0, nil
+}
 
 // CheckStarRocksIndexExists 检查StarRocks表中指定索引是否存在
 func (dm *DatabasePairManager) CheckStarRocksIndexExists(tableName, indexName string) (bool, error) {
@@ -482,7 +508,7 @@ func (dm *DatabasePairManager) CheckStarRocksIndexExists(tableName, indexName st
 	var count int
 	err = db.QueryRow(query, pair.StarRocks.Database, tableName, indexName).Scan(&count)
 	if err != nil {
-		return false, fmt.Errorf("检查索引 %s.%s.%s 是否存在失败: %w", 
+		return false, fmt.Errorf("检查索引 %s.%s.%s 是否存在失败: %w",
 			pair.StarRocks.Database, tableName, indexName, err)
 	}
 
@@ -518,9 +544,6 @@ func (dm *DatabasePairManager) CheckClickHouseColumnExists(tableName, columnName
 	return count > 0, nil
 }
 
-
-
-
 // GetClickHouseViewNames 获取ClickHouse数据库中所有视图名称
 func (dm *DatabasePairManager) GetClickHouseViewNames() ([]string, error) {
 	db, err := dm.GetClickHouseConnection()
@@ -530,7 +553,7 @@ func (dm *DatabasePairManager) GetClickHouseViewNames() ([]string, error) {
 	defer db.Close()
 
 	pair := dm.config.DatabasePairs[dm.pairIndex]
-	
+
 	// 查询所有视图
 	query := `
 		SELECT name 
@@ -538,7 +561,7 @@ func (dm *DatabasePairManager) GetClickHouseViewNames() ([]string, error) {
 		WHERE database = ? AND engine = 'View'
 		ORDER BY name
 	`
-	
+
 	rows, err := db.Query(query, pair.ClickHouse.Database)
 	if err != nil {
 		return nil, fmt.Errorf("查询ClickHouse视图列表失败: %w", err)
@@ -571,7 +594,7 @@ func (dm *DatabasePairManager) GetClickHouseTableColumns(tableName string) ([]st
 	defer db.Close()
 
 	pair := dm.config.DatabasePairs[dm.pairIndex]
-	
+
 	// 查询表的所有列
 	query := `
 		SELECT name 
@@ -579,7 +602,7 @@ func (dm *DatabasePairManager) GetClickHouseTableColumns(tableName string) ([]st
 		WHERE database = ? AND table = ?
 		ORDER BY position
 	`
-	
+
 	rows, err := db.Query(query, pair.ClickHouse.Database, tableName)
 	if err != nil {
 		return nil, fmt.Errorf("查询ClickHouse表 %s 列信息失败: %w", tableName, err)
@@ -612,7 +635,7 @@ func (dm *DatabasePairManager) GetStarRocksTableColumns(tableName string) ([]str
 	defer db.Close()
 
 	pair := dm.config.DatabasePairs[dm.pairIndex]
-	
+
 	// 查询表的所有列
 	query := `
 		SELECT COLUMN_NAME 
@@ -620,7 +643,7 @@ func (dm *DatabasePairManager) GetStarRocksTableColumns(tableName string) ([]str
 		WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
 		ORDER BY ORDINAL_POSITION
 	`
-	
+
 	rows, err := db.Query(query, pair.StarRocks.Database, tableName)
 	if err != nil {
 		return nil, fmt.Errorf("查询StarRocks表 %s 列信息失败: %w", tableName, err)
@@ -665,7 +688,7 @@ func (dm *DatabasePairManager) GetStarRocksTableIndexes(tableName string) ([]str
 
 	rows, err := db.Query(query, pair.StarRocks.Database, tableName)
 	if err != nil {
-		return nil, fmt.Errorf("查询表 %s.%s 的索引失败: %w", 
+		return nil, fmt.Errorf("查询表 %s.%s 的索引失败: %w",
 			pair.StarRocks.Database, tableName, err)
 	}
 	defer rows.Close()
@@ -690,29 +713,29 @@ func (dm *DatabasePairManager) GetStarRocksTableIndexes(tableName string) ([]str
 // ExecuteRollbackSQL 执行回退SQL语句
 func (dm *DatabasePairManager) ExecuteRollbackSQL(sqlStatements []string, isClickHouse bool) error {
 	logger.Info("开始执行回退SQL，共 %d 条语句", len(sqlStatements))
-	
+
 	for i, sql := range sqlStatements {
 		if strings.TrimSpace(sql) == "" {
 			continue
 		}
-		
+
 		logger.Debug("[%d/%d] 执行回退SQL: %s", i+1, len(sqlStatements), sql)
-		
+
 		var err error
 		if isClickHouse {
 			err = dm.ExecuteClickHouseSQL(sql)
 		} else {
 			err = dm.ExecuteStarRocksSQL(sql)
 		}
-		
+
 		if err != nil {
 			logger.Error("执行回退SQL失败: %s, 错误: %v", sql, err)
 			return fmt.Errorf("执行回退SQL失败: %w", err)
 		}
-		
+
 		logger.Debug("[%d/%d] 回退SQL执行成功", i+1, len(sqlStatements))
 	}
-	
+
 	logger.Info("所有回退SQL执行完成")
 	return nil
 }

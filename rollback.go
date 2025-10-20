@@ -52,7 +52,7 @@ func (rm *RollbackManager) ExecuteRollback() error {
 // dropAllViews 删除StarRocks中的所有视图
 func (rm *RollbackManager) dropAllViews() error {
 	logger.Info("正在删除StarRocks视图...")
-	
+
 	srTableNames, err := rm.dbManager.GetStarRocksTableNames()
 	if err != nil {
 		return fmt.Errorf("获取StarRocks表列表失败: %w", err)
@@ -85,10 +85,6 @@ func (rm *RollbackManager) dropAllViews() error {
 	return nil
 }
 
-
-
-
-
 // removeSRTableSuffix 去掉StarRocks表的后缀
 func (rm *RollbackManager) removeSRTableSuffix() error {
 	logger.Info("正在去掉StarRocks表的后缀...")
@@ -108,7 +104,7 @@ func (rm *RollbackManager) removeSRTableSuffix() error {
 	// 过滤出带有后缀的表
 	var tablesWithSuffix []string
 	var conflictTables []string // 记录可能冲突的表名
-	
+
 	for _, tableName := range tableNames {
 		if strings.HasSuffix(tableName, suffix) {
 			// 检查表是否为VIEW
@@ -136,7 +132,7 @@ func (rm *RollbackManager) removeSRTableSuffix() error {
 			}
 
 			tablesWithSuffix = append(tablesWithSuffix, tableName)
-			
+
 			// 检查去掉后缀后的表名是否已存在
 			originalTableName := strings.TrimSuffix(tableName, suffix)
 			for _, existingTable := range tableNames {
