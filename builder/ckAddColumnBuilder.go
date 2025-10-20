@@ -195,9 +195,3 @@ func (c CKAddColumnsBuilder) Build() string {
 
 	return finalSQL
 }
-
-// BuildWithExistenceCheck 构建带字段存在性检查的ALTER TABLE语句
-// 这个方法与Build()方法功能相同，但提供了更明确的语义
-func (c CKAddColumnsBuilder) BuildWithExistenceCheck() string {
-	return c.Build()
-}

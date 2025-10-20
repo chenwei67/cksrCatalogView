@@ -311,11 +311,6 @@ func (v *ViewBuilder) GenViewSQL(ckQ, srQ string) string {
 	return sql
 }
 
-// GenViewSQLWithIfNotExists 生成带IF NOT EXISTS的CREATE VIEW语句
-// 这个方法与GenViewSQL功能相同，但提供了更明确的语义
-func (v *ViewBuilder) GenViewSQLWithIfNotExists(ckQ, srQ string) string {
-	return v.GenViewSQL(ckQ, srQ)
-}
 
 // 是rowLogAlias
 func (f *CKField) Ignore() bool {

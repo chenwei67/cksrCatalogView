@@ -241,12 +241,6 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 		}
 		logger.Debug("StarRocks表结构解析完成")
 
-		// 过滤掉通过add column操作新增的字段，确保后续流程的健壮性
-		logger.Debug("正在过滤字段...")
-		logger.Debug("开始过滤字段 - ClickHouse表字段数量: %d", len(ckTable.Field))
-		ckTable = filterAddedColumns(ckTable)
-		logger.Debug("字段过滤完成 - 过滤后字段数量: %d", len(ckTable.Field))
-
 		// 步骤1: ClickHouse表新增列的处理
 		logger.Info("步骤1: 处理ClickHouse表 %s 新增列", tableName)
 		alterSQL, viewSQL, err := run(ckTable, srTable, catalogName)
@@ -348,24 +342,7 @@ func parseTableFromString(ddl string, dbName string, tableName string) (parser.T
 	}
 }
 
-func getParseTable(sqlPath string) (parser.Table, error) {
-	// 读取SQL文件并解析
-	// 这里需要根据实际需求实现
-	return parser.Table{}, nil
-}
 
-func networkSecurityLog(catalogName string) (string, string, error) {
-	// 生成网络安全日志相关的SQL
-	// 这里需要根据实际需求实现
-	alterSql := fmt.Sprintf("ALTER TABLE network_security_log ADD COLUMN IF NOT EXISTS catalog_name String DEFAULT '%s'", catalogName)
-	view := fmt.Sprintf(`
-CREATE VIEW IF NOT EXISTS network_security_log_view AS
-SELECT *
-FROM %s.default.network_security_log
-`, catalogName)
-
-	return alterSql, view, nil
-}
 
 func run(ckTable, srTable parser.Table, catalogName string) (string, string, error) {
 	logger.Debug("run函数开始 - catalogName: %s", catalogName)

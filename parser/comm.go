@@ -26,12 +26,7 @@ type Field struct {
 	IsMaterialized bool
 }
 
-func (f *Field) FieldDefaultVal() string {
-	if f.Default == nil {
-		return "-"
-	}
-	return *f.Default
-}
+
 
 type Index struct {
 	Name   string
