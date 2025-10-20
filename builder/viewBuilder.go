@@ -94,18 +94,10 @@ func NewSRTableBuilder(fields []parser.Field, tableName, dbName string) SRTableB
 	logger.Debug("创建SRTableBuilder，输入字段数量: %d", len(fields))
 
 	m := make(map[string]SRField)
-	skippedCount := 0
 	duplicateCount := 0
 
 	for i, f := range fields {
 		logger.Debug("处理StarRocks字段 #%d: %s (类型: %s)", i+1, f.Name, f.Type)
-
-		// 忽略syncFromCK字段，这是StarRocks专用的标识字段，不参与视图映射
-		if f.Name == "syncFromCK" {
-			logger.Debug("跳过syncFromCK字段")
-			skippedCount++
-			continue
-		}
 
 		// 检查是否已存在同名字段
 		if _, exists := m[f.Name]; exists {
@@ -118,8 +110,8 @@ func NewSRTableBuilder(fields []parser.Field, tableName, dbName string) SRTableB
 		}
 	}
 
-	logger.Debug("SRTableBuilder创建完成 - 总字段: %d, 跳过: %d, 重复: %d, 最终nameMap数量: %d",
-		len(fields), skippedCount, duplicateCount, len(m))
+	logger.Debug("SRTableBuilder创建完成 - 总字段: %d, 重复: %d, 最终nameMap数量: %d",
+		len(fields), duplicateCount, len(m))
 
 	return SRTableBuilder{
 		TableBuilder: TableBuilder{

@@ -220,35 +220,8 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 			}
 		}
 
-		// 步骤2: StarRocks表新增字段和索引处理
-		logger.Info("步骤2: 处理StarRocks表 %s 新增字段和索引", tableName)
-		srBuilder := builder.NewSRAddColumnBuilder(pair.StarRocks.Database, tableName)
-		srBuilder.AddSyncFromCKColumn()
-		
-		srColumnSQL := srBuilder.Build()
-		srIndexSQLs := srBuilder.BuildIndexes()
-		
-		if srColumnSQL != "" {
-			logger.Debug("执行StarRocks ADD COLUMN语句: %s", srColumnSQL)
-			if err := dbPairManager.ExecuteStarRocksSQL(srColumnSQL); err != nil {
-				logger.Error("执行StarRocks ADD COLUMN语句失败: %v", err)
-				return fmt.Errorf("执行StarRocks ADD COLUMN语句失败: %w", err)
-			}
-		}
-		
-		if len(srIndexSQLs) > 0 {
-			logger.Debug("执行StarRocks CREATE INDEX语句")
-			for _, indexSQL := range srIndexSQLs {
-				logger.Debug("执行索引SQL: %s", indexSQL)
-				if err := dbPairManager.ExecuteStarRocksSQL(indexSQL); err != nil {
-					logger.Warn("执行StarRocks CREATE INDEX语句失败: %v", err)
-					// 索引创建失败不影响主流程，继续执行
-				}
-			}
-		}
-
-		// 步骤3: StarRocks表名加后缀
-		logger.Info("步骤3: 处理StarRocks表 %s 名称加后缀", tableName)
+		// 步骤2: StarRocks表名加后缀
+		logger.Info("步骤2: 处理StarRocks表 %s 名称加后缀", tableName)
 		suffix := pair.SRTableSuffix
 		if suffix != "" && !strings.HasSuffix(tableName, suffix) {
 			// 检查表是否为native表

@@ -35,17 +35,12 @@ func (rm *RollbackManager) ExecuteRollback() error {
 		return fmt.Errorf("删除视图失败: %w", err)
 	}
 
-	// 2. 删除SR表的新增列
-	if err := rm.dropSRAddedColumns(); err != nil {
-		return fmt.Errorf("删除SR表新增列失败: %w", err)
-	}
-
-	// 3. 去掉SR表的后缀
+	// 2. 去掉SR表的后缀
 	if err := rm.removeSRTableSuffix(); err != nil {
 		return fmt.Errorf("去掉SR表后缀失败: %w", err)
 	}
 
-	// 4. 删除CK表的带后缀列
+	// 3. 删除CK表的带后缀列
 	if err := rm.dropCKAddedColumns(); err != nil {
 		return fmt.Errorf("删除CK表带后缀列失败: %w", err)
 	}
@@ -90,103 +85,9 @@ func (rm *RollbackManager) dropAllViews() error {
 	return nil
 }
 
-// dropSRAddedColumns 删除StarRocks表的新增列
-func (rm *RollbackManager) dropSRAddedColumns() error {
-	logger.Info("正在删除StarRocks表的新增列...")
 
-	// 获取所有表名
-	tableNames, err := rm.dbManager.GetStarRocksTableNames()
-	if err != nil {
-		return fmt.Errorf("获取StarRocks表列表失败: %w", err)
-	}
 
-	var totalDroppedColumns int
 
-	for _, tableName := range tableNames {
-		// 检查表是否为VIEW
-		isView, err := rm.dbManager.CheckStarRocksTableIsView(tableName)
-		if err != nil {
-			logger.Warn("检查表 %s 类型失败: %v，跳过", tableName, err)
-			continue
-		}
-
-		if isView {
-			logger.Debug("跳过VIEW表: %s", tableName)
-			continue
-		}
-
-		// 获取表的所有列
-		columnNames, err := rm.dbManager.GetStarRocksTableColumns(tableName)
-		if err != nil {
-			logger.Warn("获取表 %s 列信息失败: %v，跳过", tableName, err)
-			continue
-		}
-
-		// 构建删除列的SQL
-		var dropColumnSQLs []string
-		var dropIndexSQLs []string
-		rollbackBuilder := builder.NewRollbackBuilder(rm.pair.StarRocks.Database, tableName)
-
-		for _, columnName := range columnNames {
-			// 检查是否是需要删除的列（syncFromCK等）
-			if rm.shouldDropSRColumn(columnName) {
-				sql := rollbackBuilder.BuildDropSRColumnSQL(columnName)
-				if sql != "" {
-					dropColumnSQLs = append(dropColumnSQLs, sql)
-				}
-			}
-		}
-
-		// 获取表的索引信息并删除syncFromCK相关的索引
-		indexNames, err := rm.dbManager.GetStarRocksTableIndexes(tableName)
-		if err != nil {
-			logger.Warn("获取表 %s 索引信息失败: %v，跳过索引删除", tableName, err)
-		} else {
-			for _, indexName := range indexNames {
-				// 检查是否是syncFromCK相关的索引
-				if strings.Contains(strings.ToLower(indexName), "syncfromck") {
-					sql := rollbackBuilder.BuildDropSRIndexSQL(indexName)
-					if sql != "" {
-						dropIndexSQLs = append(dropIndexSQLs, sql)
-					}
-				}
-			}
-		}
-
-		// 先执行删除索引的SQL
-		if len(dropIndexSQLs) > 0 {
-			logger.Debug("表 %s 需要删除 %d 个索引", tableName, len(dropIndexSQLs))
-			if err := rm.dbManager.ExecuteRollbackSQL(dropIndexSQLs, false); err != nil {
-				logger.Error("删除表 %s 的索引失败: %v", tableName, err)
-				continue
-			}
-		}
-
-		// 执行删除列的SQL
-		if len(dropColumnSQLs) > 0 {
-			logger.Debug("表 %s 需要删除 %d 个列", tableName, len(dropColumnSQLs))
-			if err := rm.dbManager.ExecuteRollbackSQL(dropColumnSQLs, false); err != nil {
-				logger.Error("删除表 %s 的列失败: %v", tableName, err)
-				continue
-			}
-			totalDroppedColumns += len(dropColumnSQLs)
-		}
-	}
-
-	logger.Info("成功删除 %d 个StarRocks表的新增列", totalDroppedColumns)
-	return nil
-}
-
-// shouldDropSRColumn 判断是否应该删除StarRocks列
-func (rm *RollbackManager) shouldDropSRColumn(columnName string) bool {
-	// 只删除syncFromCK列，这是唯一确定的新增列
-	if columnName == "syncFromCK" {
-		return true
-	}
-	
-	// 不删除其他任何列，避免误删重要业务列
-	return false
-}
 
 // removeSRTableSuffix 去掉StarRocks表的后缀
 func (rm *RollbackManager) removeSRTableSuffix() error {
