@@ -157,7 +157,7 @@ func (st *SRTableBuilder) GenQuerySQL() string {
 		fieldsClause = append(fieldsClause, clause)
 	}
 	clauses := strings.Join(fieldsClause, "")
-	return fmt.Sprintf("select \n %s from %s.%s \n where  syncFromCK = \"false\"", clauses, st.DBName, st.Name)
+	return fmt.Sprintf("select \n %s from %s.%s \n", clauses, st.DBName, st.Name)
 }
 
 func NewBuilder(
@@ -313,7 +313,7 @@ func (v *ViewBuilder) GenViewSQL(ckQ, srQ string) string {
 	logger.Debug("ClickHouse查询SQL: %s", ckQ)
 	logger.Debug("StarRocks查询SQL: %s", srQ)
 
-	sql := fmt.Sprintf("create view if not exists %s.%s as \n%s \nunion all \n%s; \n", v.dbName, v.viewName, ckQ, srQ)
+	sql := fmt.Sprintf("create view if not exists %s.%s as \n%s \nwhere recordTimestamp < (select min(recordTimestamp) from %s.%s) \nunion all \n%s; \n", v.dbName, v.viewName, ckQ, v.sr.DBName, v.sr.Name, srQ)
 
 	logger.Debug("最终视图SQL:\n%s", sql)
 	return sql
