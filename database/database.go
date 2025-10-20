@@ -188,38 +188,6 @@ func (dm *DatabasePairManager) GetStarRocksTableDDL(tableName string) (string, e
 	return createStatement, nil
 }
 
-// ExportStarRocksTables 导出StarRocks表结构
-func (dm *DatabasePairManager) ExportStarRocksTables() (map[string]string, error) {
-	tableNames, err := dm.GetStarRocksTableNames()
-	if err != nil {
-		return nil, err
-	}
-
-	result := make(map[string]string)
-	for _, tableName := range tableNames {
-		// 检查表是否为VIEW
-		isView, err := dm.CheckStarRocksTableIsView(tableName)
-		if err != nil {
-			logger.Warn("检查表 %s 类型失败: %v，跳过该表", tableName, err)
-			continue
-		}
-		
-		if isView {
-			logger.Debug("跳过VIEW表: %s (VIEW表不需要导出DDL)", tableName)
-			continue
-		}
-		
-		ddl, err := dm.GetStarRocksTableDDL(tableName)
-		if err != nil {
-			logger.Error("获取表 %s 的DDL失败: %v", tableName, err)
-			continue
-		}
-		result[tableName] = ddl
-	}
-
-	return result, nil
-}
-
 // ExecuteClickHouseSQL 执行ClickHouse SQL
 func (dm *DatabasePairManager) ExecuteClickHouseSQL(sql string) error {
     db, err := dm.GetClickHouseConnection()

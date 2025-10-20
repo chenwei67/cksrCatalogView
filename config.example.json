@@ -5,18 +5,18 @@
       "catalog_name": "cold_catalog",
       "sr_table_suffix": "_local_catalog",
       "clickhouse": {
-        "host": "10.117.64.12",
+        "host": "10.107.29.99",
         "port": 31004,
         "http_port": 31003,
-        "username": "root",
-        "password": "QmDunBxpfMpFbydK9P2y",
+        "username": "defalut",
+        "password": "",
         "database": "business"
       },
       "starrocks": {
-        "host": "10.117.64.12",
+        "host": "10.107.29.99",
         "port": 32013,
         "username": "root",
-        "password": "StarRocks!@2025#.",
+        "password": "",
         "database": "business"
       }
     }

@@ -117,24 +117,7 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 
 
 
-	// 2. 导出StarRocks表结构
-	logger.Info("正在导出StarRocks表结构...")
-
-	// 2.1 先获取表名列表
-	srTableNames, err := dbPairManager.GetStarRocksTableNames()
-	if err != nil {
-		return fmt.Errorf("获取StarRocks表名列表失败: %w", err)
-	}
-
-	// 2.2 导出DDL
-	srSchemaMap, err := dbPairManager.ExportStarRocksTables()
-	if err != nil {
-		return fmt.Errorf("导出StarRocks表结构失败: %w", err)
-	}
-
-
-
-	// 3. 创建StarRocks Catalog（使用配置中指定的catalog名称）
+	// 2. 创建StarRocks Catalog（使用配置中指定的catalog名称）
 	logger.Info("正在创建StarRocks Catalog...")
 	catalogName := pair.CatalogName
 	if catalogName == "" {
@@ -145,7 +128,7 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 		return fmt.Errorf("创建StarRocks Catalog失败: %w", err)
 	}
 
-	// 6. 处理共同的表 - 重构执行顺序
+	// 3. 处理共同的表 - 重构执行顺序
 	// 获取StarRocks表名列表（在重命名之前）
 	initialSrTableNames, err := dbPairManager.GetStarRocksTableNames()
 	if err != nil {
