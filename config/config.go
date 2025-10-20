@@ -48,6 +48,9 @@ type Config struct {
 	// 多数据库对配置
 	DatabasePairs []DatabasePair `json:"database_pairs"`
 
+	// 忽略的表列表，这些表不会被处理
+	IgnoreTables []string `json:"ignore_tables"`
+
 	TempDir   string    `json:"temp_dir"`
 	DriverURL string    `json:"driver_url"`
 	Log       LogConfig `json:"log"`

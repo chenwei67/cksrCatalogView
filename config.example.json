@@ -21,6 +21,11 @@
       }
     }
   ],
+  "ignore_tables": [
+    "temp_table",
+    "test_table",
+    "backup_table"
+  ],
   "temp_dir": "./temp",
   "driver_url": "http://10.32.45.10/ftpdata/clickhouse-jdbc-0.4.6-all.jar",
   "log": {

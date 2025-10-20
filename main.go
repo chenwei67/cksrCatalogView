@@ -143,15 +143,31 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 	logger.Debug("ClickHouse表名列表: %v", ckTableNames)
 	logger.Debug("StarRocks表名列表: %v", initialSrTableNames)
 
+	// 构建忽略表的map，提高查找效率
+	ignoreTableMap := make(map[string]bool)
+	for _, ignoreTable := range cfg.IgnoreTables {
+		ignoreTableMap[ignoreTable] = true
+	}
+
+	// 构建StarRocks表名的map，提高查找效率
+	srTableMap := make(map[string]bool)
+	for _, srTableName := range initialSrTableNames {
+		srTableMap[srTableName] = true
+	}
+
 	// 找出共同的表（基于原始表名）
 	commonTables := []string{}
 	for _, ckTableName := range ckTableNames {
-		for _, srTableName := range initialSrTableNames {
-			if ckTableName == srTableName {
-				commonTables = append(commonTables, ckTableName)
-				logger.Debug("找到共同表: %s", ckTableName)
-				break
-			}
+		// 检查表是否在忽略列表中
+		if ignoreTableMap[ckTableName] {
+			logger.Info("忽略表: %s (在配置的忽略列表中)", ckTableName)
+			continue
+		}
+		
+		// 检查是否为共同表
+		if srTableMap[ckTableName] {
+			commonTables = append(commonTables, ckTableName)
+			logger.Debug("找到共同表: %s", ckTableName)
 		}
 	}
 
