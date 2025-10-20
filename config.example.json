@@ -5,26 +5,26 @@
       "catalog_name": "cold_catalog",
       "sr_table_suffix": "_local_catalog",
       "clickhouse": {
-        "host": "10.107.29.99",
+        "host": "10.117.64.15",
         "port": 31004,
         "http_port": 31003,
-        "username": "defalut",
-        "password": "",
+        "username": "root",
+        "password": "QmDunBxpfMpFbydK9P2y",
         "database": "business"
       },
       "starrocks": {
         "host": "10.107.29.99",
-        "port": 32013,
+        "port": 30938,
         "username": "root",
         "password": "",
-        "database": "business"
+        "database": "cw0"
       }
     }
   ],
   "ignore_tables": [
-    "temp_table",
-    "test_table",
-    "backup_table"
+    "asset_log",
+    "weak_log",
+    "data_security_log"
   ],
   "temp_dir": "./temp",
   "driver_url": "http://10.32.45.10/ftpdata/clickhouse-jdbc-0.4.6-all.jar",
