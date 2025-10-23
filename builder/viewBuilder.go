@@ -1,19 +1,27 @@
 package builder
 
 import (
+	"database/sql"
 	"fmt"
 	"maps"
 	"strings"
 
 	"cksr/logger"
 	"cksr/parser"
+	"cksr/retry"
 )
 
+// DatabaseManager 定义数据库管理器接口（简化版，只需要获取连接）
+type DatabaseManager interface {
+	GetStarRocksConnection() (*sql.DB, error)
+}
+
 type ViewBuilder struct {
-	ck       CKTableBuilder
-	sr       SRTableBuilder
-	viewName string // view的名称，就是ck中的name名称
-	dbName   string // 数据库名称，应该就是sr中的db
+	ck        CKTableBuilder
+	sr        SRTableBuilder
+	viewName  string          // view的名称，就是ck中的name名称
+	dbName    string          // 数据库名称，应该就是sr中的db
+	dbManager DatabaseManager // 数据库管理器，用于执行查询
 }
 
 type CKField struct {
@@ -155,14 +163,16 @@ func (st *SRTableBuilder) GenQuerySQL() string {
 func NewBuilder(
 	fieldConverters []FieldConverter,
 	srFields []parser.Field,
-	ckDBName, ckTableName, ckCatalogName, srDBName, srTableName string) ViewBuilder {
+	ckDBName, ckTableName, ckCatalogName, srDBName, srTableName string,
+	dbManager DatabaseManager) ViewBuilder {
 	ckTb := NewCKTableBuilder(fieldConverters, ckTableName, ckDBName, ckCatalogName)
 	srTb := NewSRTableBuilder(srFields, srTableName, srDBName)
 	return ViewBuilder{
-		ck:       ckTb,
-		sr:       srTb,
-		viewName: ckTableName,
-		dbName:   srDBName,
+		ck:        ckTb,
+		sr:        srTb,
+		viewName:  ckTableName,
+		dbName:    srDBName,
+		dbManager: dbManager,
 	}
 }
 
@@ -294,23 +304,58 @@ func (v *ViewBuilder) Build() (string, error) {
 	logger.Debug("生成的ClickHouse查询SQL:\n%s", ckQ)
 	logger.Debug("生成的StarRocks查询SQL:\n%s", srQ)
 
-	viewSQL := v.GenViewSQL(ckQ, srQ)
+	viewSQL, err := v.GenViewSQL(ckQ, srQ)
+	if err != nil {
+		return "", fmt.Errorf("生成视图SQL失败: %w", err)
+	}
 	logger.Debug("生成的CREATE VIEW SQL:\n%s", viewSQL)
 
 	return viewSQL, nil
 }
 
-func (v *ViewBuilder) GenViewSQL(ckQ, srQ string) string {
+func (v *ViewBuilder) GenViewSQL(ckQ, srQ string) (string, error) {
 	logger.Debug("开始生成视图SQL")
 	logger.Debug("ClickHouse查询SQL: %s", ckQ)
 	logger.Debug("StarRocks查询SQL: %s", srQ)
 
-	sql := fmt.Sprintf("create view if not exists %s.%s as \n%s \nwhere recordTimestamp < (select min(recordTimestamp) from %s.%s) \nunion all \n%s; \n", v.dbName, v.viewName, ckQ, v.sr.DBName, v.sr.Name, srQ)
+	// 先执行子查询获取固定的时间值
+	minTimestampQuery := fmt.Sprintf("select min(recordTimestamp) from %s.%s", v.sr.DBName, v.sr.Name)
+	logger.Debug("执行子查询获取最小时间戳: %s", minTimestampQuery)
+
+	// 查询最小时间戳，使用通用的重试wrapper
+	var nullableTimestamp *int64
+	var minTimestamp string
+	
+	db, err := v.dbManager.GetStarRocksConnection()
+	if err != nil {
+		return "", fmt.Errorf("获取StarRocks连接失败: %w", err)
+	}
+	defer db.Close()
+	
+	err = retry.QueryRowAndScanWithRetryDefault(db, minTimestampQuery, []interface{}{&nullableTimestamp})
+	if err != nil {
+		// 检查是否是没有数据的错误
+		if err == sql.ErrNoRows {
+			logger.Warn("表中没有数据，使用最大默认值")
+			minTimestamp = "9999999999999"
+		} else {
+			return "", fmt.Errorf("查询最小时间戳失败: %w", err)
+		}
+	} else if nullableTimestamp == nil {
+		logger.Warn("查询最小时间戳结果为NULL，使用最大默认值")
+		minTimestamp = "9999999999999"
+	} else {
+		minTimestamp = fmt.Sprintf("%d", *nullableTimestamp)
+		logger.Debug("获取到最小时间戳: %s", minTimestamp)
+	}
+
+	// 生成视图SQL，ClickHouse使用 < 条件，StarRocks使用 >= 条件
+	sql := fmt.Sprintf("create view if not exists %s.%s as \n%s \nwhere recordTimestamp < %s \nunion all \n%s \nwhere recordTimestamp >= %s; \n",
+		v.dbName, v.viewName, ckQ, minTimestamp, srQ, minTimestamp)
 
 	logger.Debug("最终视图SQL:\n%s", sql)
-	return sql
+	return sql, nil
 }
-
 
 // 是rowLogAlias
 func (f *CKField) Ignore() bool {

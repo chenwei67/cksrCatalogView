@@ -319,6 +319,7 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 			srTableAfterRename.Field,
 			ckTable.DDL.DBName, ckTable.DDL.TableName, catalogName,
 			srTableAfterRename.DDL.DBName, srTableAfterRename.DDL.TableName,
+			dbPairManager,
 		)
 		logger.Debug("VIEW builder创建完成")
 
@@ -339,7 +340,7 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 			
 			logger.Debug("执行CREATE VIEW语句: %s", viewSQL)
 			// 使用重试机制执行CREATE VIEW语句，因为依赖于前面的操作
-			if err := dbPairManager.ExecuteBatchSQLWithRetry([]string{viewSQL}, false, 20, time.Second*3); err != nil {
+			if err := dbPairManager.ExecuteBatchSQL([]string{viewSQL}, false); err != nil {
 				logger.Error("执行CREATE VIEW语句失败: %v", err)
 				return fmt.Errorf("执行CREATE VIEW语句失败: %w", err)
 			}
