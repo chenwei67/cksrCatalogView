@@ -43,6 +43,14 @@ type LogConfig struct {
 	LogLevel string `json:"log_level"`
 }
 
+// TimestampColumnConfig 时间戳列配置
+type TimestampColumnConfig struct {
+	// 列名，用于替换默认的recordTimestamp
+	Column string `json:"column"`
+	// 数据类型，支持的类型：datetime, timestamp, bigint等
+	Type string `json:"type"`
+}
+
 // Config 应用配置
 type Config struct {
 	// 多数据库对配置
@@ -50,6 +58,9 @@ type Config struct {
 
 	// 忽略的表列表，这些表不会被处理
 	IgnoreTables []string `json:"ignore_tables"`
+
+	// 时间戳列配置，格式为 "表名": {"column": "列名", "type": "数据类型"}
+	TimestampColumns map[string]TimestampColumnConfig `json:"timestamp_columns"`
 
 	TempDir   string    `json:"temp_dir"`
 	DriverURL string    `json:"driver_url"`

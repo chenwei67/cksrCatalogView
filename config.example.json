@@ -30,6 +30,20 @@
     "datalake_platform_log",
     "universal_thirdparty_log"
   ],
+  "timestamp_columns": {
+    "tableA": {
+      "column": "columnA",
+      "type": "datetime"
+    },
+    "user_behavior_log": {
+      "column": "event_time",
+      "type": "timestamp"
+    },
+    "system_log": {
+      "column": "log_timestamp",
+      "type": "bigint"
+    }
+  },
   "temp_dir": "./temp",
   "driver_url": "http://10.32.45.10/ftpdata/clickhouse-jdbc-0.4.6-all.jar",
   "log": {

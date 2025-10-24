@@ -320,6 +320,7 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 			ckTable.DDL.DBName, ckTable.DDL.TableName, catalogName,
 			srTableAfterRename.DDL.DBName, srTableAfterRename.DDL.TableName,
 			dbPairManager,
+			cfg,
 		)
 		logger.Debug("VIEW builder创建完成")
 
