@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"cksr/builder"
@@ -95,8 +97,7 @@ func main() {
 		fileManager := fileops.NewFileManager(cfg.TempDir)
 
 		if err := processDatabasePair(dbManager, fileManager, cfg, pair); err != nil {
-			log.Printf("处理数据库对 %s 失败: %v", pair.Name, err)
-			continue
+			log.Fatalf("处理数据库对 %s 失败: %v", pair.Name, err)
 		}
 
 		log.Printf("数据库对 %s 处理完成", pair.Name)
@@ -135,14 +136,18 @@ func main() {
 
 		logger.Info("视图更新器启动成功，将在后台持续运行")
 
-		// 设置优雅关闭
-		defer func() {
+		// 创建信号通道，监听系统信号
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+		// 等待信号或程序退出
+		select {
+		case sig := <-sigChan:
+			logger.Info("接收到信号 %v，程序即将退出", sig)
 			logger.Info("正在关闭视图更新器...")
 			viewUpdater.Stop()
-		}()
-
-		// 保持程序运行，等待信号
-		select {}
+			logger.Info("视图更新器已关闭")
+		}
 	} else {
 		logger.Info("视图更新器未启用，程序正常退出")
 	}

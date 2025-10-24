@@ -53,7 +53,6 @@ type ViewUpdater struct {
 	cron        *cron.Cron
 	ctx         context.Context
 	cancel      context.CancelFunc
-	wg          sync.WaitGroup
 	running     bool
 	mu          sync.RWMutex
 }
@@ -99,15 +98,11 @@ func (vu *ViewUpdater) Start() error {
 
 	logger.Info("启动视图更新器，Cron表达式: %s", vu.updaterCfg.CronExpression)
 
-	// 添加定时任务
+	// 添加定时任务，cron框架会自动在协程中执行
 	_, err := vu.cron.AddFunc(vu.updaterCfg.CronExpression, func() {
-		vu.wg.Add(1)
-		go func() {
-			defer vu.wg.Done()
-			if err := vu.updateAllViews(); err != nil {
-				logger.Error("更新视图失败: %v", err)
-			}
-		}()
+		if err := vu.updateAllViews(); err != nil {
+			logger.Error("更新视图失败: %v", err)
+		}
 	})
 	if err != nil {
 		return fmt.Errorf("添加定时任务失败: %w", err)
@@ -145,9 +140,6 @@ func (vu *ViewUpdater) Stop() {
 
 	// 取消上下文
 	vu.cancel()
-
-	// 等待所有协程完成
-	vu.wg.Wait()
 
 	vu.running = false
 	logger.Info("视图更新器已停止")

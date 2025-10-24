@@ -5,33 +5,53 @@
       "catalog_name": "cold_catalog",
       "sr_table_suffix": "_local_catalog",
       "clickhouse": {
-        "host": "10.117.64.12",
-        "port": 31004,
-        "http_port": 31003,
-        "username": "root",
-        "password": "QmDunBxpfMpFbydK9P2y",
+        "host": "10.107.29.99",
+        "port": 31032,
+        "http_port": 30076,
+        "username": "default",
+        "password": "",
         "database": "business"
       },
       "starrocks": {
-        "host": "10.117.64.12",
-        "port": 32013,
+        "host": "10.107.29.99",
+        "port": 32102,
         "username": "root",
         "password": "StarRocks!@2025#.",
-        "database": "cw0"
+        "database": "business"
       }
     }
   ],
   "ignore_tables": [
-    "asset_log",
-    "weak_log",
-    "data_security_log",
-    "datalake_report_log",
-    "report_audit_log",
-    "datalake_platform_log",
-    "universal_thirdparty_log"
+    "asset_infer",
+    "http_log_statistics_by_day",
+    "http_log_statistics_by_day_mv",
+    "label_count_by_day",
+    "label_count_by_day_mv"
   ],
+  "timestamp_columns": {
+    "datalake_report_log": {
+      "column": "insertTime",
+      "type": "datetime"
+    },
+    "report_audit_log": {
+      "column": "insertTime",
+      "type": "datetime"
+    },
+    "datalake_platform_log": {
+      "column": "insertTime",
+      "type": "datetime"
+    },
+    "asset_log": {
+      "column": "insertTime",
+      "type": "datetime"
+    },
+    "weak_log":{
+      "column": "insertTime",
+      "type": "datetime"
+    }
+  },
   "temp_dir": "./temp",
-  "driver_url": "http://10.32.45.10/ftpdata/clickhouse-jdbc-0.4.6-all.jar",
+  "driver_url": "file:///opt/starrocks/thirdparty/catalog/clickhouse-jdbc-0.4.6-all.jar",
   "log": {
     "enable_file_log": true,
     "log_file_path": "",
@@ -39,8 +59,8 @@
   },
   "view_updater": {
     "enabled": true,
-    "cron_expression": "0 0 2 * * *",
-    "debug_mode": false,
+    "cron_expression": "*/10 * * * * *",
+    "debug_mode": true,
     "k8s_namespace": "default",
     "lease_name": "cksr-view-updater",
     "identity": "cksr-instance",
