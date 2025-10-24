@@ -320,9 +320,22 @@ func (v *ViewBuilder) Build() (string, error) {
 // getTimestampColumnName 根据配置获取指定表的时间戳列名，如果没有配置则返回默认的recordTimestamp
 func (v *ViewBuilder) getTimestampColumnName(tableName string) string {
 	if v.config != nil && v.config.TimestampColumns != nil {
+		// 首先尝试使用完整表名查找配置
 		if columnConfig, exists := v.config.TimestampColumns[tableName]; exists {
 			logger.Debug("表 %s 使用自定义时间戳列名: %s", tableName, columnConfig.Column)
 			return columnConfig.Column
+		}
+		
+		// 如果没有找到配置，尝试去除可能的表后缀后再查找
+		// 遍历所有数据库对，检查是否有匹配的后缀
+		for _, pair := range v.config.DatabasePairs {
+			if pair.SRTableSuffix != "" && strings.HasSuffix(tableName, pair.SRTableSuffix) {
+				originalTableName := strings.TrimSuffix(tableName, pair.SRTableSuffix)
+				if columnConfig, exists := v.config.TimestampColumns[originalTableName]; exists {
+					logger.Debug("表 %s (去除后缀 %s 后为 %s) 使用自定义时间戳列名: %s", tableName, pair.SRTableSuffix, originalTableName, columnConfig.Column)
+					return columnConfig.Column
+				}
+			}
 		}
 	}
 	logger.Debug("表 %s 使用默认时间戳列名: recordTimestamp", tableName)
@@ -332,9 +345,22 @@ func (v *ViewBuilder) getTimestampColumnName(tableName string) string {
 // getTimestampColumnType 根据配置获取指定表的时间戳列数据类型，如果没有配置则返回默认的bigint
 func (v *ViewBuilder) getTimestampColumnType(tableName string) string {
 	if v.config != nil && v.config.TimestampColumns != nil {
+		// 首先尝试使用完整表名查找配置
 		if columnConfig, exists := v.config.TimestampColumns[tableName]; exists {
 			logger.Debug("表 %s 使用自定义时间戳列类型: %s", tableName, columnConfig.Type)
 			return columnConfig.Type
+		}
+		
+		// 如果没有找到配置，尝试去除可能的表后缀后再查找
+		// 遍历所有数据库对，检查是否有匹配的后缀
+		for _, pair := range v.config.DatabasePairs {
+			if pair.SRTableSuffix != "" && strings.HasSuffix(tableName, pair.SRTableSuffix) {
+				originalTableName := strings.TrimSuffix(tableName, pair.SRTableSuffix)
+				if columnConfig, exists := v.config.TimestampColumns[originalTableName]; exists {
+					logger.Debug("表 %s (去除后缀 %s 后为 %s) 使用自定义时间戳列类型: %s", tableName, pair.SRTableSuffix, originalTableName, columnConfig.Type)
+					return columnConfig.Type
+				}
+			}
 		}
 	}
 	return "bigint"

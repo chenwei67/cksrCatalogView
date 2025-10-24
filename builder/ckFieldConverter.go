@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	"cksr/parser"
 	"cksr/logger"
+	"cksr/parser"
 )
 
 const (
@@ -53,14 +53,14 @@ func IsAddedColumnByName(fieldName string) bool {
 // 如果支持，构造好当前的fieldConverter，内嵌的Field只需要type和name
 func NewFieldConverter(f parser.Field, names map[string]struct{}) (FieldConverter, error) {
 	logger.Debug("NewFieldConverter开始处理字段 %s，原始类型: %s", f.Name, f.Type)
-	
+
 	realType := reformat(f.Type)
 	if realType == "" {
 		logger.Error("字段类型无效 - 字段: %s, 类型: %s", f.Name, f.Type)
 		return FieldConverter{}, fmt.Errorf("field %s type %s invalid", f.Name, f.Type)
 	}
 	logger.Debug("字段 %s 类型重新格式化: %s -> %s", f.Name, f.Type, realType)
-	
+
 	// 类型检查
 	err := typeCheck(realType)
 	if err != nil {
@@ -88,7 +88,7 @@ func NewFieldConverter(f parser.Field, names map[string]struct{}) (FieldConverte
 
 func NewConverters(table parser.Table) ([]FieldConverter, error) {
 	logger.Debug("NewConverters开始处理表 %s.%s，总字段数: %d", table.DDL.DBName, table.DDL.TableName, len(table.Field))
-	
+
 	var res []FieldConverter
 	names := make(map[string]struct{})
 	for _, f := range table.Field {
@@ -98,24 +98,24 @@ func NewConverters(table parser.Table) ([]FieldConverter, error) {
 	processedCount := 0
 	skippedMaterialized := 0
 	skippedAdded := 0
-	
+
 	for i, f := range table.Field {
 		if i > 0 && i%50 == 0 {
 			logger.Debug("NewConverters进度: 已处理 %d/%d 字段", i, len(table.Field))
 		}
-		
+
 		// 忽略物化字段
 		if f.IsMaterialized {
 			skippedMaterialized++
 			continue
 		}
-		
+
 		// 过滤掉通过add column操作新增的字段
 		if IsAddedColumnByName(f.Name) {
 			skippedAdded++
 			continue
 		}
-		
+
 		logger.Debug("正在处理字段 %s (类型: %s)", f.Name, f.Type)
 		c, err := NewFieldConverter(f, names)
 		if err != nil {
@@ -125,16 +125,16 @@ func NewConverters(table parser.Table) ([]FieldConverter, error) {
 		res = append(res, c)
 		processedCount++
 	}
-	
-	logger.Debug("NewConverters完成 - 总字段: %d, 处理: %d, 跳过物化: %d, 跳过新增: %d", 
+
+	logger.Debug("NewConverters完成 - 总字段: %d, 处理: %d, 跳过物化: %d, 跳过新增: %d",
 		len(table.Field), processedCount, skippedMaterialized, skippedAdded)
-	
+
 	return res, nil
 }
 
 func ckNameMap(f *parser.Field, names map[string]struct{}) *parser.Field {
 	logger.Debug("ckNameMap开始处理字段: %s (类型: %s)", f.Name, f.Type)
-	
+
 	newF := new(parser.Field)
 	if IsArrayIPV6(f.Type) {
 		logger.Debug("字段 %s 是Array(IPv6)类型，需要名称映射", f.Name)
@@ -169,16 +169,16 @@ func ckNameMap(f *parser.Field, names map[string]struct{}) *parser.Field {
 
 func nameWithSuffix(name string, names map[string]struct{}) string {
 	logger.Debug("nameWithSuffix开始处理字段名: %s", name)
-	
+
 	newName := fmt.Sprintf("%s%s", name, nameSuffix)
 	logger.Debug("生成带后缀的名称: %s", newName)
-	
+
 	// 检查基础名称是否已存在
 	if _, ok := names[newName]; !ok {
 		logger.Debug("名称 %s 可用，直接返回", newName)
 		return newName
 	}
-	
+
 	// 如果已经存在带TmpSrConverter后缀的列，直接使用该列
 	logger.Debug("发现已存在带TmpSrConverter后缀的列: %s，直接复用", newName)
 	return newName
@@ -224,10 +224,10 @@ func typeCheck(t string) error {
 				return nil
 			}
 			_, err := strconv.Atoi(remain)
-		if err != nil {
-			logger.Error("类型解析错误 - t: %s, err: %s", t, err.Error())
-			return fmt.Errorf("%w %s", NotSupportTypeErr, t)
-		}
+			if err != nil {
+				logger.Error("类型解析错误 - t: %s, err: %s", t, err.Error())
+				return fmt.Errorf("%w %s", NotSupportTypeErr, t)
+			}
 			return nil
 		}
 	}

@@ -13,39 +13,65 @@
         "database": "business"
       },
       "starrocks": {
-        "host": "10.117.64.12",
-        "port": 32013,
+        "host": "10.107.29.99",
+        "port": 30938,
         "username": "root",
-        "password": "StarRocks!@2025#.",
+        "password": "",
         "database": "cw0"
+      }
+    },
+    {
+      "name": "cold",
+      "catalog_name": "cold_catalog",
+      "sr_table_suffix": "_local_catalog",
+      "clickhouse": {
+        "host": "10.117.64.12",
+        "port": 31004,
+        "http_port": 31003,
+        "username": "root",
+        "password": "QmDunBxpfMpFbydK9P2y",
+        "database": "dspm"
+      },
+      "starrocks": {
+        "host": "10.107.29.99",
+        "port": 30938,
+        "username": "root",
+        "password": "",
+        "database": "dspm"
       }
     }
   ],
   "ignore_tables": [
-    "asset_log",
-    "weak_log",
-    "data_security_log",
-    "datalake_report_log",
-    "report_audit_log",
-    "datalake_platform_log",
-    "universal_thirdparty_log"
+    "asset_infer",
+    "http_log_statistics_by_day",
+    "http_log_statistics_by_day_mv",
+    "label_count_by_day",
+    ""
   ],
   "timestamp_columns": {
-    "tableA": {
-      "column": "columnA",
+    "datalake_report_log": {
+      "column": "insertTime",
       "type": "datetime"
     },
-    "user_behavior_log": {
-      "column": "event_time",
-      "type": "timestamp"
+    "report_audit_log": {
+      "column": "insertTime",
+      "type": "datetime"
     },
-    "system_log": {
-      "column": "log_timestamp",
-      "type": "bigint"
+    "datalake_platform_log": {
+      "column": "insertTime",
+      "type": "datetime"
+    },
+    "asset_log": {
+      "column": "insertTime",
+      "type": "datetime"
+    },
+    "weak_log":{
+      "column": "insertTime",
+      "type": "datetime"
     }
   },
   "temp_dir": "./temp",
-  "driver_url": "http://10.32.45.10/ftpdata/clickhouse-jdbc-0.4.6-all.jar",
+  "driver_url": "file:///cw/clickhouse-jdbc-0.4.6-all.jar",
   "log": {
     "enable_file_log": true,
     "log_file_path": "",
