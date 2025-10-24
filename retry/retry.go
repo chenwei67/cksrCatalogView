@@ -54,7 +54,7 @@ func QueryRowAndScanWithRetryDefault(db *sql.DB, query string, args []interface{
 func QueryWithRetry(db *sql.DB, config Config, query string, args ...interface{}) (*sql.Rows, error) {
 	var err error
 	var rows *sql.Rows
-	
+
 	for i := 0; i <= config.MaxRetries; i++ {
 		if i > 0 {
 			logger.Warn("重试查询 (第%d次): %s", i, query)

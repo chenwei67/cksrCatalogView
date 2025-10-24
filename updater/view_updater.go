@@ -1,0 +1,381 @@
+/*
+ * @File : view_updater
+ * @Date : 2025/1/27
+ * @Author : Assistant
+ * @Version: 1.0.0
+ * @Description: 动态更新视图时间边界的协程管理器
+ */
+
+package updater
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"strings"
+	"sync"
+	"time"
+
+	"cksr/builder"
+	"cksr/config"
+	"cksr/database"
+	"cksr/lock"
+	"cksr/logger"
+	"cksr/parser"
+	"cksr/retry"
+
+	"github.com/robfig/cron/v3"
+)
+
+// ViewUpdaterConfig 视图更新器配置
+type ViewUpdaterConfig struct {
+	// Cron表达式，定义更新时间
+	CronExpression string `json:"cron_expression"`
+	// 是否启用调试模式（使用虚拟锁）
+	DebugMode bool `json:"debug_mode"`
+	// K8s命名空间（非调试模式时使用）
+	K8sNamespace string `json:"k8s_namespace"`
+	// Lease名称
+	LeaseName string `json:"lease_name"`
+	// 实例标识
+	Identity string `json:"identity"`
+	// 锁持有时间
+	LockDuration time.Duration `json:"lock_duration"`
+	// 是否启用视图更新器
+	Enabled bool `json:"enabled"`
+}
+
+// ViewUpdater 视图更新器
+type ViewUpdater struct {
+	config      *config.Config
+	updaterCfg  *ViewUpdaterConfig
+	lockManager lock.LockManager
+	cron        *cron.Cron
+	ctx         context.Context
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
+	running     bool
+	mu          sync.RWMutex
+}
+
+// NewViewUpdater 创建视图更新器
+func NewViewUpdater(cfg *config.Config, updaterCfg *ViewUpdaterConfig) (*ViewUpdater, error) {
+	if !updaterCfg.Enabled {
+		return nil, fmt.Errorf("视图更新器未启用")
+	}
+
+	// 创建锁管理器
+	lockManager, err := lock.CreateLockManager(
+		updaterCfg.DebugMode,
+		updaterCfg.K8sNamespace,
+		updaterCfg.LeaseName,
+		updaterCfg.Identity,
+		updaterCfg.LockDuration,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("创建锁管理器失败: %w", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	return &ViewUpdater{
+		config:      cfg,
+		updaterCfg:  updaterCfg,
+		lockManager: lockManager,
+		cron:        cron.New(cron.WithSeconds()),
+		ctx:         ctx,
+		cancel:      cancel,
+	}, nil
+}
+
+// Start 启动视图更新器
+func (vu *ViewUpdater) Start() error {
+	vu.mu.Lock()
+	defer vu.mu.Unlock()
+
+	if vu.running {
+		return fmt.Errorf("视图更新器已在运行")
+	}
+
+	logger.Info("启动视图更新器，Cron表达式: %s", vu.updaterCfg.CronExpression)
+
+	// 添加定时任务
+	_, err := vu.cron.AddFunc(vu.updaterCfg.CronExpression, func() {
+		vu.wg.Add(1)
+		go func() {
+			defer vu.wg.Done()
+			if err := vu.updateAllViews(); err != nil {
+				logger.Error("更新视图失败: %v", err)
+			}
+		}()
+	})
+	if err != nil {
+		return fmt.Errorf("添加定时任务失败: %w", err)
+	}
+
+	vu.cron.Start()
+	vu.running = true
+
+	logger.Info("视图更新器启动成功")
+	return nil
+}
+
+// executeSQL 执行SQL语句
+func (vu *ViewUpdater) executeSQL(db *sql.DB, sqlStr string) error {
+	_, err := db.Exec(sqlStr)
+	if err != nil {
+		return fmt.Errorf("执行SQL失败: %w", err)
+	}
+	return nil
+}
+
+// Stop 停止视图更新器
+func (vu *ViewUpdater) Stop() {
+	vu.mu.Lock()
+	defer vu.mu.Unlock()
+
+	if !vu.running {
+		return
+	}
+
+	logger.Info("正在停止视图更新器...")
+
+	// 停止cron调度器
+	vu.cron.Stop()
+
+	// 取消上下文
+	vu.cancel()
+
+	// 等待所有协程完成
+	vu.wg.Wait()
+
+	vu.running = false
+	logger.Info("视图更新器已停止")
+}
+
+// IsRunning 检查是否正在运行
+func (vu *ViewUpdater) IsRunning() bool {
+	vu.mu.RLock()
+	defer vu.mu.RUnlock()
+	return vu.running
+}
+
+// updateAllViews 更新所有视图的时间边界
+func (vu *ViewUpdater) updateAllViews() error {
+	logger.Info("开始更新所有视图的时间边界")
+
+	// 获取锁
+	releaseLock, err := vu.lockManager.AcquireLock(vu.ctx)
+	if err != nil {
+		return fmt.Errorf("获取锁失败: %w", err)
+	}
+	defer releaseLock()
+
+	logger.Info("成功获取锁，开始更新视图")
+
+	// 遍历所有数据库对
+	for i, pair := range vu.config.DatabasePairs {
+		logger.Info("开始更新数据库对 %s 的视图", pair.Name)
+
+		dbManager := database.NewDatabasePairManager(vu.config, i)
+		if err := vu.updateViewsForPair(dbManager, pair); err != nil {
+			logger.Error("更新数据库对 %s 的视图失败: %v", pair.Name, err)
+			continue
+		}
+
+		logger.Info("数据库对 %s 的视图更新完成", pair.Name)
+	}
+
+	logger.Info("所有视图时间边界更新完成")
+	return nil
+}
+
+// updateViewsForPair 更新单个数据库对的视图
+func (vu *ViewUpdater) updateViewsForPair(dbManager *database.DatabasePairManager, pair config.DatabasePair) error {
+	// 获取StarRocks连接
+	srDB, err := dbManager.GetStarRocksConnection()
+	if err != nil {
+		return fmt.Errorf("获取StarRocks连接失败: %w", err)
+	}
+	defer srDB.Close()
+
+	// 获取ClickHouse连接
+	chDB, err := dbManager.GetClickHouseConnection()
+	if err != nil {
+		return fmt.Errorf("获取ClickHouse连接失败: %w", err)
+	}
+	defer chDB.Close()
+
+	// 获取所有视图
+	views, err := vu.getAllViews(srDB, pair.StarRocks.Database)
+	if err != nil {
+		return fmt.Errorf("获取视图列表失败: %w", err)
+	}
+
+	logger.Info("找到 %d 个视图需要更新", len(views))
+
+	// 更新每个视图
+	for _, viewName := range views {
+		if err := vu.updateSingleView(srDB, chDB, dbManager, pair, viewName); err != nil {
+			logger.Error("更新视图 %s 失败: %v", viewName, err)
+			continue
+		}
+		logger.Debug("视图 %s 更新成功", viewName)
+	}
+
+	return nil
+}
+
+// getAllViews 获取所有视图名称
+func (vu *ViewUpdater) getAllViews(srDB *sql.DB, database string) ([]string, error) {
+	query := fmt.Sprintf("SELECT TABLE_NAME FROM information_schema.VIEWS WHERE TABLE_SCHEMA = '%s'", database)
+
+	rows, err := retry.QueryWithRetryDefault(srDB, query)
+	if err != nil {
+		return nil, fmt.Errorf("查询视图失败: %w", err)
+	}
+	defer rows.Close()
+
+	var views []string
+	for rows.Next() {
+		var viewName string
+		if err := rows.Scan(&viewName); err != nil {
+			return nil, fmt.Errorf("扫描视图名称失败: %w", err)
+		}
+		views = append(views, viewName)
+	}
+
+	return views, nil
+}
+
+// updateSingleView 更新单个视图的时间边界
+func (vu *ViewUpdater) updateSingleView(srDB, chDB *sql.DB, dbManager *database.DatabasePairManager, pair config.DatabasePair, viewName string) error {
+	// 根据视图名和配置后缀生成StarRocks表名
+	srTableName := vu.getStarRocksTableNameFromView(viewName, pair)
+
+	originalTableName := viewName
+	
+	// 获取ClickHouse表结构
+	ckSchemaMap, err := dbManager.ExportClickHouseTables()
+	if err != nil {
+		return fmt.Errorf("导出ClickHouse表结构失败: %w", err)
+	}
+	
+	ckDDL, exists := ckSchemaMap[originalTableName]
+	if !exists {
+		return fmt.Errorf("未找到ClickHouse表 %s 的DDL", originalTableName)
+	}
+	
+	// 解析ClickHouse表结构
+	ckTable, err := vu.parseTableFromString(ckDDL, pair.ClickHouse.Database, originalTableName)
+	if err != nil {
+		return fmt.Errorf("解析ClickHouse表%s失败: %w", originalTableName, err)
+	}
+	
+	// 获取StarRocks表结构
+	srDDL, err := dbManager.GetStarRocksTableDDL(srTableName)
+	if err != nil {
+		return fmt.Errorf("获取StarRocks表%s的DDL失败: %w", srTableName, err)
+	}
+	
+	// 解析StarRocks表结构
+	srTable, err := vu.parseTableFromString(srDDL, pair.StarRocks.Database, srTableName)
+	if err != nil {
+		return fmt.Errorf("解析StarRocks表%s失败: %w", srTableName, err)
+	}
+	
+	// 创建字段转换器
+	fieldConverters, err := vu.createFieldConverters(ckTable, srTable, pair)
+	if err != nil {
+		return fmt.Errorf("创建字段转换器失败: %w", err)
+	}
+	
+	// 获取catalog名称
+	catalogName := pair.CatalogName
+	if catalogName == "" {
+		return fmt.Errorf("catalog名称为空")
+	}
+	
+	// 创建ViewBuilder并生成ALTER VIEW SQL
+	viewBuilder := vu.createViewBuilder(
+		fieldConverters,
+		srTable.Field,
+		ckTable.DDL.DBName, ckTable.DDL.TableName, catalogName,
+		srTable.DDL.DBName, srTable.DDL.TableName,
+		dbManager,
+		viewName, // 传入视图名
+	)
+	
+	// 使用ViewBuilder的Build方法来处理字段映射和生成CREATE VIEW SQL
+	createViewSQL, err := viewBuilder.Build()
+	if err != nil {
+		return fmt.Errorf("构建视图SQL失败: %w", err)
+	}
+	
+	// 将CREATE VIEW转换为ALTER VIEW
+	alterViewSQL := strings.Replace(createViewSQL, "create view if not exists", "alter view", 1)
+	
+	// 执行ALTER VIEW语句
+	if err := vu.executeSQL(srDB, alterViewSQL); err != nil {
+		return fmt.Errorf("执行ALTER VIEW语句失败: %w", err)
+	}
+
+	logger.Info("视图 %s 已使用ALTER VIEW更新", viewName)
+	return nil
+}
+
+
+
+// getStarRocksTableNameFromView 根据视图名和配置后缀生成StarRocks表名
+func (vu *ViewUpdater) getStarRocksTableNameFromView(viewName string, pair config.DatabasePair) string {
+	// 添加配置的后缀生成StarRocks表名
+	srTableName := viewName + pair.SRTableSuffix
+	
+	return srTableName
+}
+
+
+// parseTableFromString 解析表结构字符串
+func (vu *ViewUpdater) parseTableFromString(ddl string, dbName string, tableName string) (parser.Table, error) {
+	// 直接使用parser.ParserTableSQL解析DDL
+	table := parser.ParserTableSQL(ddl)
+	
+	// 强制设置正确的数据库名和表名
+	if dbName != "" {
+		table.DDL.DBName = dbName
+	}
+	if tableName != "" {
+		table.DDL.TableName = tableName
+	}
+	
+	return table, nil
+}
+
+// createFieldConverters 创建字段转换器
+func (vu *ViewUpdater) createFieldConverters(ckTable, srTable parser.Table, pair config.DatabasePair) ([]builder.FieldConverter, error) {
+	// 创建字段转换器
+	fieldConverters, err := builder.NewConverters(ckTable)
+	if err != nil {
+		return nil, fmt.Errorf("创建字段转换器失败: %w", err)
+	}
+	
+	return fieldConverters, nil
+}
+
+// createViewBuilder 创建ViewBuilder实例
+func (vu *ViewUpdater) createViewBuilder(
+	fieldConverters []builder.FieldConverter,
+	srFields []parser.Field,
+	ckDBName, ckTableName, catalogName string,
+	srDBName, srTableName string,
+	dbManager *database.DatabasePairManager,
+	viewName string,
+) builder.ViewBuilder {
+	return builder.NewBuilder(
+		fieldConverters,
+		srFields,
+		ckDBName, ckTableName, catalogName,
+		srDBName, srTableName,
+		dbManager,
+	)
+}

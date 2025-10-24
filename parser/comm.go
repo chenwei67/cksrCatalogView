@@ -26,8 +26,6 @@ type Field struct {
 	IsMaterialized bool
 }
 
-
-
 type Index struct {
 	Name   string
 	Fields []string

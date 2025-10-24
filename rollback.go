@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"cksr/builder"
 	"cksr/config"
 	"cksr/database"
+	"cksr/lock"
 	"cksr/logger"
 )
 
@@ -220,15 +223,34 @@ func (rm *RollbackManager) dropCKAddedColumns() error {
 
 // ExecuteRollbackForAllPairs 对所有数据库对执行回退操作
 func ExecuteRollbackForAllPairs(cfg *config.Config) error {
-	logger.Info("开始对所有数据库对执行回退操作...")
+	// 创建锁管理器，确保回滚操作与视图更新器互斥
+	lockManager, err := lock.CreateLockManager(
+		cfg.ViewUpdater.DebugMode,
+		cfg.ViewUpdater.K8sNamespace,
+		cfg.ViewUpdater.LeaseName,
+		cfg.ViewUpdater.Identity+"-rollback",
+		time.Duration(cfg.ViewUpdater.LockDurationSeconds)*time.Second,
+	)
+	if err != nil {
+		return fmt.Errorf("创建锁管理器失败: %w", err)
+	}
+
+	// 获取锁
+	releaseLock, err := lockManager.AcquireLock(context.Background())
+	if err != nil {
+		return fmt.Errorf("获取锁失败，可能有其他操作正在进行: %w", err)
+	}
+	defer releaseLock()
+
+	logger.Info("成功获取锁，开始执行回滚操作")
 
 	for i, pair := range cfg.DatabasePairs {
-		logger.Info("正在处理数据库对 %s (索引: %d)", pair.Name, i)
+		logger.Info("开始回退数据库对: %s", pair.Name)
 
 		rollbackManager := NewRollbackManager(cfg, i)
 		if err := rollbackManager.ExecuteRollback(); err != nil {
-			logger.Error("数据库对 %s 回退失败: %v", pair.Name, err)
-			return fmt.Errorf("数据库对 %s 回退失败: %w", pair.Name, err)
+			logger.Error("回退数据库对 %s 失败: %v", pair.Name, err)
+			continue
 		}
 
 		logger.Info("数据库对 %s 回退完成", pair.Name)

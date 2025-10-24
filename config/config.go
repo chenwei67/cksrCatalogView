@@ -43,6 +43,24 @@ type LogConfig struct {
 	LogLevel string `json:"log_level"`
 }
 
+// ViewUpdaterConfig 视图更新器配置
+type ViewUpdaterConfig struct {
+	// 是否启用视图更新器
+	Enabled bool `json:"enabled"`
+	// Cron表达式，定义更新时间
+	CronExpression string `json:"cron_expression"`
+	// 是否启用调试模式（使用虚拟锁）
+	DebugMode bool `json:"debug_mode"`
+	// K8s命名空间（非调试模式时使用）
+	K8sNamespace string `json:"k8s_namespace"`
+	// Lease名称
+	LeaseName string `json:"lease_name"`
+	// 实例标识
+	Identity string `json:"identity"`
+	// 锁持有时间（秒）
+	LockDurationSeconds int `json:"lock_duration_seconds"`
+}
+
 // Config 应用配置
 type Config struct {
 	// 多数据库对配置
@@ -54,6 +72,9 @@ type Config struct {
 	TempDir   string    `json:"temp_dir"`
 	DriverURL string    `json:"driver_url"`
 	Log       LogConfig `json:"log"`
+
+	// 视图更新器配置
+	ViewUpdater ViewUpdaterConfig `json:"view_updater"`
 }
 
 // LoadConfig 从配置文件加载配置
@@ -76,6 +97,23 @@ func LoadConfig(configPath string) (*Config, error) {
 	// 设置日志配置默认值
 	if config.Log.LogLevel == "" {
 		config.Log.LogLevel = "INFO"
+	}
+
+	// 设置视图更新器配置默认值
+	if config.ViewUpdater.CronExpression == "" {
+		config.ViewUpdater.CronExpression = "0 0 2 * * *" // 每天凌晨2点
+	}
+	if config.ViewUpdater.K8sNamespace == "" {
+		config.ViewUpdater.K8sNamespace = "default"
+	}
+	if config.ViewUpdater.LeaseName == "" {
+		config.ViewUpdater.LeaseName = "cksr-view-updater"
+	}
+	if config.ViewUpdater.Identity == "" {
+		config.ViewUpdater.Identity = "cksr-instance"
+	}
+	if config.ViewUpdater.LockDurationSeconds == 0 {
+		config.ViewUpdater.LockDurationSeconds = 300 // 5分钟
 	}
 
 	// 验证配置

@@ -156,21 +156,21 @@ func (dm *DatabasePairManager) GetStarRocksTableNames() ([]string, error) {
 // GetStarRocksTableDDL 获取StarRocks表的DDL（使用通用重试wrapper）
 func (dm *DatabasePairManager) GetStarRocksTableDDL(tableName string) (string, error) {
 	var ddl string
-	
+
 	db, err := dm.GetStarRocksConnection()
 	if err != nil {
 		return "", fmt.Errorf("获取StarRocks连接失败: %w", err)
 	}
 	defer db.Close()
-	
+
 	pair := dm.config.DatabasePairs[dm.pairIndex]
 	createQuery := fmt.Sprintf("SHOW CREATE TABLE `%s`.`%s`", pair.StarRocks.Database, tableName)
-	
+
 	err = retry.QueryRowAndScanWithRetryDefault(db, createQuery, []interface{}{&tableName, &ddl})
 	if err != nil {
 		return "", fmt.Errorf("获取表 %s 的DDL失败: %w", tableName, err)
 	}
-	
+
 	return ddl, nil
 }
 

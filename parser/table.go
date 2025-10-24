@@ -9,8 +9,8 @@
 package parser
 
 import (
-	"strings"
 	"cksr/logger"
+	"strings"
 )
 
 func (t *Table) parserTableName(s string) bool {
@@ -18,16 +18,16 @@ func (t *Table) parserTableName(s string) bool {
 	if !strings.HasPrefix(s, indexStr) {
 		return false
 	}
-	
+
 	logger.Debug("解析CREATE TABLE行: %s", s)
-	
+
 	// 移除CREATE TABLE前缀
 	remaining := strings.TrimSpace(s[len(indexStr):])
 	logger.Debug("移除CREATE TABLE后: %s", remaining)
-	
+
 	// 找到表名部分（在第一个空格或括号之前）
 	var tableName string
-	
+
 	// 处理带反引号的表名
 	if strings.HasPrefix(remaining, "`") {
 		// 找到第二个反引号的位置
@@ -46,14 +46,14 @@ func (t *Table) parserTableName(s string) bool {
 			}
 		}
 	}
-	
+
 	logger.Debug("提取的表名: %s", tableName)
-	
+
 	if tableName == "" {
 		logger.Debug("表名解析失败")
 		return false
 	}
-	
+
 	// 处理数据库名.表名的格式
 	if strings.Contains(tableName, ".") {
 		names := strings.Split(tableName, ".")
@@ -64,7 +64,7 @@ func (t *Table) parserTableName(s string) bool {
 	} else {
 		t.DDL.TableName = strings.Trim(tableName, "`")
 	}
-	
+
 	logger.Debug("最终解析结果 - 数据库: %s, 表名: %s", t.DDL.DBName, t.DDL.TableName)
 	return true
 }
@@ -82,24 +82,24 @@ func fetchWord(ss string, begin int) (string, int) {
 	var word string
 	var stack = make([]rune, 100)
 	var stackIndex = 1
-	inQuotes := false  // 添加引号状态跟踪
+	inQuotes := false // 添加引号状态跟踪
 
 	for ; begin <= len(s)-1; begin++ {
 		if begin == len(s)-1 && s[begin] == ',' {
 			break
 		}
-		
+
 		// 关键修复：只有在非引号内才因空格退出
 		if s[begin] == ' ' && stackIndex <= 1 && !inQuotes {
 			break
 		}
-		
+
 		word += string(s[begin])
 
 		switch s[begin] {
-		case '"':  // 处理双引号
+		case '"': // 处理双引号
 			inQuotes = !inQuotes
-		case 39:   // 处理单引号
+		case 39: // 处理单引号
 			if stack[stackIndex-1] == 39 {
 				stackIndex--
 			} else {
@@ -129,12 +129,12 @@ func fetchWord(ss string, begin int) (string, int) {
 			}
 		}
 	}
-	
+
 	if stackIndex > 1 {
 		logger.Error("字段解析异常,括号退栈失败, %s | %d %d", ss, len(stack), stackIndex)
 		panic("字段解析异常,括号退栈失败")
 	}
-	
+
 	return word, begin
 }
 

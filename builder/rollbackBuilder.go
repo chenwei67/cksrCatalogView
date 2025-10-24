@@ -60,7 +60,7 @@ func (r RollbackBuilder) BuildRenameSRTableSQL(suffix string) string {
 		logger.Debug("RollbackBuilder.BuildRenameSRTableSQL() 表名不包含后缀，跳过: %s", r.tableName)
 		return ""
 	}
-	
+
 	originalTableName := strings.TrimSuffix(r.tableName, suffix)
 	logger.Debug("RollbackBuilder.BuildRenameSRTableSQL() 构建重命名SQL: %s -> %s", r.tableName, originalTableName)
 	sql := fmt.Sprintf("ALTER TABLE `%s`.`%s` RENAME `%s`", r.dbName, r.tableName, originalTableName)
@@ -86,10 +86,10 @@ func NewRollbackColumnsBuilder(dbName, tableName string) RollbackColumnsBuilder 
 // BuildDropCKColumnsSQL 构建删除ClickHouse表中所有带后缀列的SQL
 func (r RollbackColumnsBuilder) BuildDropCKColumnsSQL(fields []parser.Field) []string {
 	logger.Debug("RollbackColumnsBuilder.BuildDropCKColumnsSQL() 开始构建删除CK列SQL，表: %s.%s", r.dbName, r.tableName)
-	
+
 	var sqls []string
 	builder := NewRollbackBuilder(r.dbName, r.tableName)
-	
+
 	for _, field := range fields {
 		// 检查是否是带后缀的列（通过add column操作新增的）
 		if IsAddedColumnByName(field.Name) {
@@ -99,7 +99,7 @@ func (r RollbackColumnsBuilder) BuildDropCKColumnsSQL(fields []parser.Field) []s
 			}
 		}
 	}
-	
+
 	logger.Debug("RollbackColumnsBuilder.BuildDropCKColumnsSQL() 生成%d条删除CK列SQL", len(sqls))
 	return sqls
 }
@@ -107,10 +107,10 @@ func (r RollbackColumnsBuilder) BuildDropCKColumnsSQL(fields []parser.Field) []s
 // BuildDropSRColumnsSQL 构建删除StarRocks表中所有新增列的SQL
 func (r RollbackColumnsBuilder) BuildDropSRColumnsSQL(fields []parser.Field) []string {
 	logger.Debug("RollbackColumnsBuilder.BuildDropSRColumnsSQL() 开始构建删除SR列SQL，表: %s.%s", r.dbName, r.tableName)
-	
+
 	var sqls []string
 	builder := NewRollbackBuilder(r.dbName, r.tableName)
-	
+
 	for _, field := range fields {
 		// 检查是否是新增的列（这里需要根据实际情况判断哪些是新增的列）
 		// 可以通过列名模式、创建时间或其他标识来判断
@@ -121,7 +121,7 @@ func (r RollbackColumnsBuilder) BuildDropSRColumnsSQL(fields []parser.Field) []s
 			}
 		}
 	}
-	
+
 	logger.Debug("RollbackColumnsBuilder.BuildDropSRColumnsSQL() 生成%d条删除SR列SQL", len(sqls))
 	return sqls
 }
@@ -131,9 +131,9 @@ func (r RollbackColumnsBuilder) BuildDropSRColumnsSQL(fields []parser.Field) []s
 func (r RollbackColumnsBuilder) isAddedSRColumn(field parser.Field) bool {
 	// 示例：如果列名包含特定后缀或模式，则认为是新增的列
 	// 这里需要根据实际的列命名规则来调整
-	return strings.Contains(field.Name, "sync_from_ck") || 
-		   strings.Contains(field.Name, "_added") ||
-		   strings.Contains(field.Name, "_new")
+	return strings.Contains(field.Name, "sync_from_ck") ||
+		strings.Contains(field.Name, "_added") ||
+		strings.Contains(field.Name, "_new")
 }
 
 // ViewRollbackBuilder 视图回退构建器
@@ -153,7 +153,7 @@ func NewViewRollbackBuilder(viewName, dbName string) ViewRollbackBuilder {
 // BuildDropAllViewsSQL 构建删除所有视图的SQL
 func (v ViewRollbackBuilder) BuildDropAllViewsSQL(viewNames []string) []string {
 	logger.Debug("ViewRollbackBuilder.BuildDropAllViewsSQL() 开始构建删除所有视图SQL，数据库: %s", v.dbName)
-	
+
 	var sqls []string
 	for _, viewName := range viewNames {
 		builder := NewRollbackBuilder(v.dbName, viewName)
@@ -162,7 +162,7 @@ func (v ViewRollbackBuilder) BuildDropAllViewsSQL(viewNames []string) []string {
 			sqls = append(sqls, sql)
 		}
 	}
-	
+
 	logger.Debug("ViewRollbackBuilder.BuildDropAllViewsSQL() 生成%d条删除视图SQL", len(sqls))
 	return sqls
 }
@@ -182,7 +182,7 @@ func NewTableRollbackBuilder(dbName string) TableRollbackBuilder {
 // BuildRenameSRTablesSQL 构建重命名所有StarRocks表的SQL（去掉后缀）
 func (t TableRollbackBuilder) BuildRenameSRTablesSQL(tableNames []string, suffix string) []string {
 	logger.Debug("TableRollbackBuilder.BuildRenameSRTablesSQL() 开始构建重命名SR表SQL，数据库: %s，后缀: %s", t.dbName, suffix)
-	
+
 	var sqls []string
 	for _, tableName := range tableNames {
 		builder := NewRollbackBuilder(t.dbName, tableName)
@@ -191,7 +191,7 @@ func (t TableRollbackBuilder) BuildRenameSRTablesSQL(tableNames []string, suffix
 			sqls = append(sqls, sql)
 		}
 	}
-	
+
 	logger.Debug("TableRollbackBuilder.BuildRenameSRTablesSQL() 生成%d条重命名表SQL", len(sqls))
 	return sqls
 }

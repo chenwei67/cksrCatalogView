@@ -15,6 +15,7 @@ import (
 	"cksr/fileops"
 	"cksr/logger"
 	"cksr/parser"
+	"cksr/updater"
 )
 
 func main() {
@@ -102,6 +103,49 @@ func main() {
 	}
 
 	log.Println("所有数据库对处理完成")
+
+	// 启动视图更新器（仅在正常运行模式下）
+	if cfg.ViewUpdater.Enabled {
+		logger.Info("启动视图更新器...")
+
+		// 创建视图更新器配置
+		updaterConfig := &updater.ViewUpdaterConfig{
+			Enabled:        cfg.ViewUpdater.Enabled,
+			CronExpression: cfg.ViewUpdater.CronExpression,
+			DebugMode:      cfg.ViewUpdater.DebugMode,
+			K8sNamespace:   cfg.ViewUpdater.K8sNamespace,
+			LeaseName:      cfg.ViewUpdater.LeaseName,
+			Identity:       cfg.ViewUpdater.Identity,
+			LockDuration:   time.Duration(cfg.ViewUpdater.LockDurationSeconds) * time.Second,
+		}
+
+		// 创建并启动视图更新器
+		viewUpdater, err := updater.NewViewUpdater(cfg, updaterConfig)
+		if err != nil {
+			logger.Error("创建视图更新器失败: %v", err)
+			logger.Info("程序将正常退出")
+			return
+		}
+
+		if err := viewUpdater.Start(); err != nil {
+			logger.Error("启动视图更新器失败: %v", err)
+			logger.Info("程序将正常退出")
+			return
+		}
+
+		logger.Info("视图更新器启动成功，将在后台持续运行")
+
+		// 设置优雅关闭
+		defer func() {
+			logger.Info("正在关闭视图更新器...")
+			viewUpdater.Stop()
+		}()
+
+		// 保持程序运行，等待信号
+		select {}
+	} else {
+		logger.Info("视图更新器未启用，程序正常退出")
+	}
 }
 
 // processDatabasePair 处理单个数据库对的完整流程
@@ -225,10 +269,10 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 			actualSRTableName = tableName + suffix
 			logger.Info("使用已知的重命名表名获取DDL: %s -> %s", tableName, actualSRTableName)
 		}
-		
+
 		// 步骤1: 构建并执行ClickHouse ALTER SQL
 		logger.Info("步骤1: 构建并执行ClickHouse表 %s 的ALTER SQL", tableName)
-		
+
 		// 生成字段转换器
 		logger.Debug("开始创建字段转换器...")
 		fieldConverters, err := builder.NewConverters(ckTable)
@@ -253,7 +297,7 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 			logger.Debug("数据库: %s.%s", ckTable.DDL.DBName, ckTable.DDL.TableName)
 			logger.Debug("SQL内容:\n%s", alterSQL)
 			logger.Debug("=== ALTER SQL语句结束 ===")
-			
+
 			logger.Debug("执行ClickHouse ALTER TABLE语句: %s", alterSQL)
 			if err := dbPairManager.ExecuteBatchSQL([]string{alterSQL}, true); err != nil {
 				logger.Error("执行ClickHouse ALTER TABLE语句失败: %v", err)
@@ -295,7 +339,7 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 
 		// 步骤3: 构建并执行StarRocks VIEW SQL
 		logger.Info("步骤3: 构建并执行StarRocks表 %s 的VIEW SQL", tableName)
-		
+
 		// 重新解析StarRocks表结构，使用重命名后的表名
 		logger.Debug("正在重新获取StarRocks表DDL (重命名后表名: %s)...", renamedTableName)
 		srDDLAfterRename, err := dbPairManager.GetStarRocksTableDDL(renamedTableName)
@@ -337,7 +381,7 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 			logger.Debug("视图名: %s.%s", pair.StarRocks.Database, tableName)
 			logger.Debug("SQL内容:\n%s", viewSQL)
 			logger.Debug("=== VIEW SQL语句结束 ===")
-			
+
 			logger.Debug("执行CREATE VIEW语句: %s", viewSQL)
 			// 使用重试机制执行CREATE VIEW语句，因为依赖于前面的操作
 			if err := dbPairManager.ExecuteBatchSQL([]string{viewSQL}, false); err != nil {
@@ -354,7 +398,6 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 	logger.Info("数据库对 %s 处理完成", pairName)
 	return nil
 }
-
 
 // parseTableFromString 从DDL字符串解析表结构，并设置正确的数据库名和表名
 func parseTableFromString(ddl string, dbName string, tableName string) (parser.Table, error) {

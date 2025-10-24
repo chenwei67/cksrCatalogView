@@ -314,7 +314,15 @@ func (v *ViewBuilder) Build() (string, error) {
 }
 
 func (v *ViewBuilder) GenViewSQL(ckQ, srQ string) (string, error) {
-	logger.Debug("开始生成视图SQL")
+	return v.GenViewSQLWithType(ckQ, srQ, "CREATE")
+}
+
+func (v *ViewBuilder) GenAlterViewSQL(ckQ, srQ string) (string, error) {
+	return v.GenViewSQLWithType(ckQ, srQ, "ALTER")
+}
+
+func (v *ViewBuilder) GenViewSQLWithType(ckQ, srQ string, sqlType string) (string, error) {
+	logger.Debug("开始生成视图SQL (类型: %s)", sqlType)
 	logger.Debug("ClickHouse查询SQL: %s", ckQ)
 	logger.Debug("StarRocks查询SQL: %s", srQ)
 
@@ -325,13 +333,13 @@ func (v *ViewBuilder) GenViewSQL(ckQ, srQ string) (string, error) {
 	// 查询最小时间戳，使用通用的重试wrapper
 	var nullableTimestamp *int64
 	var minTimestamp string
-	
+
 	db, err := v.dbManager.GetStarRocksConnection()
 	if err != nil {
 		return "", fmt.Errorf("获取StarRocks连接失败: %w", err)
 	}
 	defer db.Close()
-	
+
 	err = retry.QueryRowAndScanWithRetryDefault(db, minTimestampQuery, []interface{}{&nullableTimestamp})
 	if err != nil {
 		// 检查是否是没有数据的错误
@@ -349,9 +357,15 @@ func (v *ViewBuilder) GenViewSQL(ckQ, srQ string) (string, error) {
 		logger.Debug("获取到最小时间戳: %s", minTimestamp)
 	}
 
-	// 生成视图SQL，ClickHouse使用 < 条件，StarRocks使用 >= 条件
-	sql := fmt.Sprintf("create view if not exists %s.%s as \n%s \nwhere recordTimestamp < %s \nunion all \n%s \nwhere recordTimestamp >= %s; \n",
-		v.dbName, v.viewName, ckQ, minTimestamp, srQ, minTimestamp)
+	// 根据SQL类型生成不同的语句
+	var sql string
+	if sqlType == "ALTER" {
+		sql = fmt.Sprintf("alter view %s.%s as \n%s \nwhere recordTimestamp < %s \nunion all \n%s \nwhere recordTimestamp >= %s; \n",
+			v.dbName, v.viewName, ckQ, minTimestamp, srQ, minTimestamp)
+	} else {
+		sql = fmt.Sprintf("create view if not exists %s.%s as \n%s \nwhere recordTimestamp < %s \nunion all \n%s \nwhere recordTimestamp >= %s; \n",
+			v.dbName, v.viewName, ckQ, minTimestamp, srQ, minTimestamp)
+	}
 
 	logger.Debug("最终视图SQL:\n%s", sql)
 	return sql, nil

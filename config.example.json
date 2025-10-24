@@ -36,5 +36,14 @@
     "enable_file_log": true,
     "log_file_path": "",
     "log_level": "DEBUG"
+  },
+  "view_updater": {
+    "enabled": true,
+    "cron_expression": "0 0 2 * * *",
+    "debug_mode": false,
+    "k8s_namespace": "default",
+    "lease_name": "cksr-view-updater",
+    "identity": "cksr-instance",
+    "lock_duration_seconds": 300
   }
 }

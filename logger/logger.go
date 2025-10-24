@@ -56,7 +56,7 @@ func InitFileLogging(enableFileLog bool, logFilePath string, tempDir string) err
 		if err := os.MkdirAll(logsDir, 0755); err != nil {
 			return fmt.Errorf("创建日志目录失败: %w", err)
 		}
-		
+
 		// 生成带时间戳的日志文件名
 		timestamp := time.Now().Format("20060102_150405")
 		logFilePath = filepath.Join(logsDir, fmt.Sprintf("cksr_%s.log", timestamp))
