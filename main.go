@@ -200,8 +200,7 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 		// 检查StarRocks表是否为VIEW
 		isView, err := dbPairManager.CheckStarRocksTableIsView(tableName)
 		if err != nil {
-			logger.Warn("检查表 %s 类型失败: %v，跳过处理", tableName, err)
-			continue
+			return fmt.Errorf("检查表 %s 类型失败: %v，跳过处理", tableName, err)
 		}
 
 		if isView {

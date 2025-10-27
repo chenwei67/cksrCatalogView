@@ -367,38 +367,33 @@ func (v *ViewBuilder) getTimestampColumnType(tableName string) string {
 }
 
 // getDefaultTimestampValue 根据数据类型获取默认的最大时间戳值
-func (v *ViewBuilder) getDefaultTimestampValue(dataType string) string {
+func (v *ViewBuilder) getDefaultTimestampValue(dataType string) (string, error) {
 	switch strings.ToLower(dataType) {
+	case "date":
+		return "'9999-12-31'", nil
 	case "datetime":
-		return "'9999-12-31 23:59:59'"
-	case "timestamp":
-		return "'2038-01-19 03:14:07'"
-	case "bigint", "int64":
-		return "9999999999999"
+		return "'9999-12-31 23:59:59'", nil
+	case "bigint":
+		return "9999999999999", nil
 	default:
-		logger.Warn("未知的时间戳数据类型: %s，使用默认值", dataType)
-		return "9999999999999"
+		return "", fmt.Errorf("不支持的时间戳数据类型: %s，仅支持date、datetime、bigint", dataType)
 	}
 }
 
 // formatTimestampValue 根据数据类型格式化时间戳值
-func (v *ViewBuilder) formatTimestampValue(value string, dataType string) string {
+func (v *ViewBuilder) formatTimestampValue(value string, dataType string) (string, error) {
 	switch strings.ToLower(dataType) {
-	case "datetime", "timestamp":
+	case "date", "datetime":
 		// 对于日期时间类型，需要用单引号包围
 		if !strings.HasPrefix(value, "'") {
-			return fmt.Sprintf("'%s'", value)
+			return fmt.Sprintf("'%s'", value), nil
 		}
-		return value
-	case "bigint", "int64":
+		return value, nil
+	case "bigint":
 		// 对于数字类型，直接返回
-		return value
+		return value, nil
 	default:
-		// 只有在非默认类型时才输出warn日志
-		if strings.ToLower(dataType) != "bigint" {
-			logger.Warn("未知的时间戳数据类型: %s，按数字类型处理", dataType)
-		}
-		return value
+		return "", fmt.Errorf("不支持的时间戳数据类型: %s，仅支持date、datetime、bigint", dataType)
 	}
 }
 func (v *ViewBuilder) GenViewSQL(ckQ, srQ string) (string, error) {
@@ -431,15 +426,24 @@ func (v *ViewBuilder) GenViewSQL(ckQ, srQ string) (string, error) {
 		if err != nil {
 			if err == sql.ErrNoRows {
 				logger.Warn("表中没有数据，使用最大默认值")
-				minTimestamp = v.getDefaultTimestampValue(timestampType)
+				minTimestamp, err = v.getDefaultTimestampValue(timestampType)
+				if err != nil {
+					return "", fmt.Errorf("获取默认时间戳值失败: %w", err)
+				}
 			} else {
 				return "", fmt.Errorf("查询最小时间戳失败: %w", err)
 			}
 		} else if nullableTimestamp == nil {
 			logger.Warn("查询最小时间戳结果为NULL，使用最大默认值")
-			minTimestamp = v.getDefaultTimestampValue(timestampType)
+			minTimestamp, err = v.getDefaultTimestampValue(timestampType)
+			if err != nil {
+				return "", fmt.Errorf("获取默认时间戳值失败: %w", err)
+			}
 		} else {
-			minTimestamp = v.formatTimestampValue(*nullableTimestamp, timestampType)
+			minTimestamp, err = v.formatTimestampValue(*nullableTimestamp, timestampType)
+			if err != nil {
+				return "", fmt.Errorf("格式化时间戳值失败: %w", err)
+			}
 			logger.Debug("获取到最小时间戳: %s", minTimestamp)
 		}
 	default:
@@ -452,13 +456,19 @@ func (v *ViewBuilder) GenViewSQL(ckQ, srQ string) (string, error) {
 		if err != nil {
 			if err == sql.ErrNoRows {
 				logger.Warn("表中没有数据，使用最大默认值")
-				minTimestamp = v.getDefaultTimestampValue(timestampType)
+				minTimestamp, err = v.getDefaultTimestampValue(timestampType)
+				if err != nil {
+					return "", fmt.Errorf("获取默认时间戳值失败: %w", err)
+				}
 			} else {
 				return "", fmt.Errorf("查询最小时间戳失败: %w", err)
 			}
 		} else if nullableTimestamp == nil {
 			logger.Warn("查询最小时间戳结果为NULL，使用最大默认值")
-			minTimestamp = v.getDefaultTimestampValue(timestampType)
+			minTimestamp, err = v.getDefaultTimestampValue(timestampType)
+			if err != nil {
+				return "", fmt.Errorf("获取默认时间戳值失败: %w", err)
+			}
 		} else {
 			minTimestamp = fmt.Sprintf("%d", *nullableTimestamp)
 			logger.Debug("获取到最小时间戳: %s", minTimestamp)
