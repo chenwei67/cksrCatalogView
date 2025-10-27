@@ -76,5 +76,9 @@
     "enable_file_log": true,
     "log_file_path": "",
     "log_level": "DEBUG"
+  },
+  "retry": {
+    "max_retries": 3,
+    "delay_ms": 100
   }
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"cksr/config"
 	"cksr/logger"
 )
 
@@ -18,6 +19,14 @@ type Config struct {
 var DefaultConfig = Config{
 	MaxRetries: 3,
 	Delay:      100 * time.Millisecond,
+}
+
+// ConfigFromAppConfig 从应用配置创建重试配置
+func ConfigFromAppConfig(appConfig *config.Config) Config {
+	return Config{
+		MaxRetries: appConfig.Retry.MaxRetries,
+		Delay:      time.Duration(appConfig.Retry.DelayMs) * time.Millisecond,
+	}
 }
 
 // QueryRowAndScanWithRetry 带重试的单行查询和扫描

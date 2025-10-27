@@ -51,6 +51,14 @@ type TimestampColumnConfig struct {
 	Type string `json:"type"`
 }
 
+// RetryConfig 重试配置
+type RetryConfig struct {
+	// 最大重试次数
+	MaxRetries int `json:"max_retries"`
+	// 重试间隔（毫秒）
+	DelayMs int `json:"delay_ms"`
+}
+
 // Config 应用配置
 type Config struct {
 	// 多数据库对配置
@@ -62,9 +70,10 @@ type Config struct {
 	// 时间戳列配置，格式为 "表名": {"column": "列名", "type": "数据类型"}
 	TimestampColumns map[string]TimestampColumnConfig `json:"timestamp_columns"`
 
-	TempDir   string    `json:"temp_dir"`
-	DriverURL string    `json:"driver_url"`
-	Log       LogConfig `json:"log"`
+	TempDir   string      `json:"temp_dir"`
+	DriverURL string      `json:"driver_url"`
+	Log       LogConfig   `json:"log"`
+	Retry     RetryConfig `json:"retry"`
 }
 
 // LoadConfig 从配置文件加载配置
@@ -87,6 +96,14 @@ func LoadConfig(configPath string) (*Config, error) {
 	// 设置日志配置默认值
 	if config.Log.LogLevel == "" {
 		config.Log.LogLevel = "INFO"
+	}
+
+	// 设置重试配置默认值
+	if config.Retry.MaxRetries == 0 {
+		config.Retry.MaxRetries = 3
+	}
+	if config.Retry.DelayMs == 0 {
+		config.Retry.DelayMs = 100
 	}
 
 	// 验证配置

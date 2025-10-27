@@ -376,10 +376,7 @@ func (v *ViewBuilder) getDefaultTimestampValue(dataType string) string {
 	case "bigint", "int64":
 		return "9999999999999"
 	default:
-		// 只有在非默认类型时才输出warn日志
-		if strings.ToLower(dataType) != "bigint" {
-			logger.Warn("未知的时间戳数据类型: %s，使用默认值", dataType)
-		}
+		logger.Warn("未知的时间戳数据类型: %s，使用默认值", dataType)
 		return "9999999999999"
 	}
 }
