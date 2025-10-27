@@ -113,7 +113,7 @@ func (dm *DatabasePairManager) ExportClickHouseTables() (map[string]string, erro
 		// 使用重试机制获取表的创建语句
 		createQuery := fmt.Sprintf("SHOW CREATE TABLE %s", tableName)
 		var createStatement string
-		if err := retry.QueryRowAndScanWithRetryDefault(db, createQuery, []interface{}{&createStatement}); err != nil {
+		if err := retry.QueryRowAndScanWithRetryDefault(db, dm.config, createQuery, []interface{}{&createStatement}); err != nil {
 			logger.Warn("获取表 %s 的创建语句失败: %v", tableName, err)
 			continue
 		}
@@ -135,7 +135,7 @@ func (dm *DatabasePairManager) GetStarRocksTableNames() ([]string, error) {
 	pair := dm.config.DatabasePairs[dm.pairIndex]
 
 	// 使用重试机制获取表列表
-	rows, err := retry.QueryWithRetryDefault(db, fmt.Sprintf("SHOW TABLES FROM %s", pair.StarRocks.Database))
+	rows, err := retry.QueryWithRetryDefault(db, dm.config, fmt.Sprintf("SHOW TABLES FROM %s", pair.StarRocks.Database))
 	if err != nil {
 		return nil, fmt.Errorf("获取表列表失败: %w", err)
 	}
@@ -166,7 +166,7 @@ func (dm *DatabasePairManager) GetStarRocksTableDDL(tableName string) (string, e
 	pair := dm.config.DatabasePairs[dm.pairIndex]
 	createQuery := fmt.Sprintf("SHOW CREATE TABLE `%s`.`%s`", pair.StarRocks.Database, tableName)
 	
-	err = retry.QueryRowAndScanWithRetryDefault(db, createQuery, []interface{}{&tableName, &ddl})
+	err = retry.QueryRowAndScanWithRetryDefault(db, dm.config, createQuery, []interface{}{&tableName, &ddl})
 	if err != nil {
 		return "", fmt.Errorf("获取表 %s 的DDL失败: %w", tableName, err)
 	}
@@ -336,7 +336,7 @@ func (dm *DatabasePairManager) CheckStarRocksColumnExists(tableName, columnName 
 	`
 
 	var count int
-	err = retry.QueryRowAndScanWithRetryDefault(db, query, []interface{}{&count}, pair.StarRocks.Database, tableName, columnName)
+	err = retry.QueryRowAndScanWithRetryDefault(db, dm.config, query, []interface{}{&count}, pair.StarRocks.Database, tableName, columnName)
 	if err != nil {
 		return false, fmt.Errorf("检查列是否存在失败: %w", err)
 	}
@@ -363,7 +363,7 @@ func (dm *DatabasePairManager) CheckStarRocksTableIsNative(tableName string) (bo
 	`
 
 	var tableType string
-	err = retry.QueryRowAndScanWithRetryDefault(db, query, []interface{}{&tableType}, pair.StarRocks.Database, tableName)
+	err = retry.QueryRowAndScanWithRetryDefault(db, dm.config, query, []interface{}{&tableType}, pair.StarRocks.Database, tableName)
 	if err != nil {
 		return false, fmt.Errorf("检查表 %s.%s 类型失败: %w",
 			pair.StarRocks.Database, tableName, err)
@@ -396,7 +396,7 @@ func (dm *DatabasePairManager) CheckStarRocksTableIsView(tableName string) (bool
 	`
 
 	var tableType string
-	err = retry.QueryRowAndScanWithRetryDefault(db, query, []interface{}{&tableType}, pair.StarRocks.Database, tableName)
+	err = retry.QueryRowAndScanWithRetryDefault(db, dm.config, query, []interface{}{&tableType}, pair.StarRocks.Database, tableName)
 	if err != nil {
 		// 如果查询结果为"no rows in result set"，说明表/视图不存在，返回false而不是错误
 		if err == sql.ErrNoRows {
@@ -429,7 +429,7 @@ func (dm *DatabasePairManager) CheckStarRocksTableExists(tableName string) (bool
 	`
 
 	var count int
-	err = retry.QueryRowAndScanWithRetryDefault(db, query, []interface{}{&count}, pair.StarRocks.Database, tableName)
+	err = retry.QueryRowAndScanWithRetryDefault(db, dm.config, query, []interface{}{&count}, pair.StarRocks.Database, tableName)
 	if err != nil {
 		return false, fmt.Errorf("检查表 %s.%s 是否存在失败: %w",
 			pair.StarRocks.Database, tableName, err)
@@ -458,7 +458,7 @@ func (dm *DatabasePairManager) CheckStarRocksIndexExists(tableName, indexName st
 	`
 
 	var count int
-	err = retry.QueryRowAndScanWithRetryDefault(db, query, []interface{}{&count}, pair.StarRocks.Database, tableName, indexName)
+	err = retry.QueryRowAndScanWithRetryDefault(db, dm.config, query, []interface{}{&count}, pair.StarRocks.Database, tableName, indexName)
 	if err != nil {
 		return false, fmt.Errorf("检查索引 %s.%s.%s 是否存在失败: %w",
 			pair.StarRocks.Database, tableName, indexName, err)
@@ -487,7 +487,7 @@ func (dm *DatabasePairManager) CheckClickHouseColumnExists(tableName, columnName
 	`
 
 	var count int
-	err = retry.QueryRowAndScanWithRetryDefault(db, query, []interface{}{&count}, pair.ClickHouse.Database, tableName, columnName)
+	err = retry.QueryRowAndScanWithRetryDefault(db, dm.config, query, []interface{}{&count}, pair.ClickHouse.Database, tableName, columnName)
 	if err != nil {
 		return false, fmt.Errorf("检查ClickHouse字段 %s.%s.%s 是否存在失败: %w",
 			pair.ClickHouse.Database, tableName, columnName, err)
@@ -515,7 +515,7 @@ func (dm *DatabasePairManager) GetClickHouseViewNames() ([]string, error) {
 	`
 
 	// 使用重试机制获取视图列表
-	rows, err := retry.QueryWithRetryDefault(db, query, pair.ClickHouse.Database)
+	rows, err := retry.QueryWithRetryDefault(db, dm.config, query, pair.ClickHouse.Database)
 	if err != nil {
 		return nil, fmt.Errorf("查询ClickHouse视图列表失败: %w", err)
 	}
@@ -557,7 +557,7 @@ func (dm *DatabasePairManager) GetClickHouseTableColumns(tableName string) ([]st
 	`
 
 	// 使用重试机制获取表字段列表
-	rows, err := retry.QueryWithRetryDefault(db, query, pair.ClickHouse.Database, tableName)
+	rows, err := retry.QueryWithRetryDefault(db, dm.config, query, pair.ClickHouse.Database, tableName)
 	if err != nil {
 		return nil, fmt.Errorf("查询ClickHouse表 %s 列信息失败: %w", tableName, err)
 	}
@@ -599,7 +599,7 @@ func (dm *DatabasePairManager) GetStarRocksTableColumns(tableName string) ([]str
 	`
 
 	// 使用重试机制获取表字段列表
-	rows, err := retry.QueryWithRetryDefault(db, query, pair.StarRocks.Database, tableName)
+	rows, err := retry.QueryWithRetryDefault(db, dm.config, query, pair.StarRocks.Database, tableName)
 	if err != nil {
 		return nil, fmt.Errorf("查询StarRocks表 %s 列信息失败: %w", tableName, err)
 	}
@@ -642,7 +642,7 @@ func (dm *DatabasePairManager) GetStarRocksTableIndexes(tableName string) ([]str
 	`
 
 	// 使用重试机制获取表索引列表
-	rows, err := retry.QueryWithRetryDefault(db, query, pair.StarRocks.Database, tableName)
+	rows, err := retry.QueryWithRetryDefault(db, dm.config, query, pair.StarRocks.Database, tableName)
 	if err != nil {
 		return nil, fmt.Errorf("查询表 %s.%s 的索引失败: %w",
 			pair.StarRocks.Database, tableName, err)

@@ -427,7 +427,7 @@ func (v *ViewBuilder) GenViewSQL(ckQ, srQ string) (string, error) {
 	switch strings.ToLower(timestampType) {
 	case "datetime", "timestamp":
 		var nullableTimestamp *string
-		err = retry.QueryRowAndScanWithRetryDefault(db, minTimestampQuery, []interface{}{&nullableTimestamp})
+		err = retry.QueryRowAndScanWithRetryDefault(db, v.config, minTimestampQuery, []interface{}{&nullableTimestamp})
 		if err != nil {
 			if err == sql.ErrNoRows {
 				logger.Warn("表中没有数据，使用最大默认值")
@@ -448,7 +448,7 @@ func (v *ViewBuilder) GenViewSQL(ckQ, srQ string) (string, error) {
 			logger.Warn("未知的时间戳数据类型: %s，按bigint处理", timestampType)
 		}
 		var nullableTimestamp *int64
-		err = retry.QueryRowAndScanWithRetryDefault(db, minTimestampQuery, []interface{}{&nullableTimestamp})
+		err = retry.QueryRowAndScanWithRetryDefault(db, v.config, minTimestampQuery, []interface{}{&nullableTimestamp})
 		if err != nil {
 			if err == sql.ErrNoRows {
 				logger.Warn("表中没有数据，使用最大默认值")

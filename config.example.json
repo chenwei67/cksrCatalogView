@@ -78,7 +78,7 @@
     "log_level": "DEBUG"
   },
   "retry": {
-    "max_retries": 3,
-    "delay_ms": 100
+    "max_retries": 10,
+    "delay_ms": 500
   }
 }
