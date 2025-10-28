@@ -222,7 +222,7 @@ func (vu *ViewUpdater) updateViewsForPair(dbManager *database.DatabasePairManage
 func (vu *ViewUpdater) getAllViews(srDB *sql.DB, database string) ([]string, error) {
 	query := fmt.Sprintf("SELECT TABLE_NAME FROM information_schema.VIEWS WHERE TABLE_SCHEMA = '%s'", database)
 
-	rows, err := retry.QueryWithRetryDefault(srDB, query)
+	rows, err := retry.QueryWithRetryDefault(srDB, vu.config, query)
 	if err != nil {
 		return nil, fmt.Errorf("查询视图失败: %w", err)
 	}
@@ -369,5 +369,6 @@ func (vu *ViewUpdater) createViewBuilder(
 		ckDBName, ckTableName, catalogName,
 		srDBName, srTableName,
 		dbManager,
+		vu.config,
 	)
 }

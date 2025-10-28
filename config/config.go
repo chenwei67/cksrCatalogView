@@ -132,6 +132,8 @@ func LoadConfig(configPath string) (*Config, error) {
 	}
 	if config.ViewUpdater.LockDurationSeconds == 0 {
 		config.ViewUpdater.LockDurationSeconds = 300 // 5分钟
+	}
+	
 	// 设置重试配置默认值
 	if config.Retry.MaxRetries == 0 {
 		config.Retry.MaxRetries = 3
