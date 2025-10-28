@@ -60,3 +60,6 @@ k8s/*secret*.yaml
 .env
 .env.local
 .env.*.local
+
+
+sql
