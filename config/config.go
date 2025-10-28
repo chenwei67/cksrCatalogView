@@ -60,6 +60,21 @@ type ViewUpdaterConfig struct {
 	// 锁持有时间（秒）
 	LockDurationSeconds int `json:"lock_duration_seconds"`
 }
+// TimestampColumnConfig 时间戳列配置
+type TimestampColumnConfig struct {
+	// 列名，用于替换默认的recordTimestamp
+	Column string `json:"column"`
+	// 数据类型，支持的类型：datetime, timestamp, bigint等
+	Type string `json:"type"`
+}
+
+// RetryConfig 重试配置
+type RetryConfig struct {
+	// 最大重试次数
+	MaxRetries int `json:"max_retries"`
+	// 重试间隔（毫秒）
+	DelayMs int `json:"delay_ms"`
+}
 
 // Config 应用配置
 type Config struct {
@@ -69,10 +84,13 @@ type Config struct {
 	// 忽略的表列表，这些表不会被处理
 	IgnoreTables []string `json:"ignore_tables"`
 
-	TempDir   string    `json:"temp_dir"`
-	DriverURL string    `json:"driver_url"`
-	Log       LogConfig `json:"log"`
+	// 时间戳列配置，格式为 "表名": {"column": "列名", "type": "数据类型"}
+	TimestampColumns map[string]TimestampColumnConfig `json:"timestamp_columns"`
 
+	TempDir   string      `json:"temp_dir"`
+	DriverURL string      `json:"driver_url"`
+	Log       LogConfig   `json:"log"`
+	Retry     RetryConfig `json:"retry"`
 	// 视图更新器配置
 	ViewUpdater ViewUpdaterConfig `json:"view_updater"`
 }
@@ -114,6 +132,12 @@ func LoadConfig(configPath string) (*Config, error) {
 	}
 	if config.ViewUpdater.LockDurationSeconds == 0 {
 		config.ViewUpdater.LockDurationSeconds = 300 // 5分钟
+	// 设置重试配置默认值
+	if config.Retry.MaxRetries == 0 {
+		config.Retry.MaxRetries = 3
+	}
+	if config.Retry.DelayMs == 0 {
+		config.Retry.DelayMs = 100
 	}
 
 	// 验证配置

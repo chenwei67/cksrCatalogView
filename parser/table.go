@@ -9,8 +9,8 @@
 package parser
 
 import (
-	"cksr/logger"
 	"strings"
+	"cksr/logger"
 )
 
 func (t *Table) parserTableName(s string) bool {
@@ -53,7 +53,6 @@ func (t *Table) parserTableName(s string) bool {
 		logger.Debug("表名解析失败")
 		return false
 	}
-
 	// 处理数据库名.表名的格式
 	if strings.Contains(tableName, ".") {
 		names := strings.Split(tableName, ".")
@@ -64,7 +63,6 @@ func (t *Table) parserTableName(s string) bool {
 	} else {
 		t.DDL.TableName = strings.Trim(tableName, "`")
 	}
-
 	logger.Debug("最终解析结果 - 数据库: %s, 表名: %s", t.DDL.DBName, t.DDL.TableName)
 	return true
 }
@@ -88,7 +86,6 @@ func fetchWord(ss string, begin int) (string, int) {
 		if begin == len(s)-1 && s[begin] == ',' {
 			break
 		}
-
 		// 关键修复：只有在非引号内才因空格退出
 		if s[begin] == ' ' && stackIndex <= 1 && !inQuotes {
 			break
@@ -129,12 +126,10 @@ func fetchWord(ss string, begin int) (string, int) {
 			}
 		}
 	}
-
 	if stackIndex > 1 {
 		logger.Error("字段解析异常,括号退栈失败, %s | %d %d", ss, len(stack), stackIndex)
 		panic("字段解析异常,括号退栈失败")
 	}
-
 	return word, begin
 }
 

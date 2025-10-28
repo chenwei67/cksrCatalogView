@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"cksr/config"
 	"cksr/logger"
 )
 
@@ -14,10 +15,13 @@ type Config struct {
 	Delay      time.Duration // 重试间隔
 }
 
-// DefaultConfig 默认重试配置
-var DefaultConfig = Config{
-	MaxRetries: 3,
-	Delay:      100 * time.Millisecond,
+
+// ConfigFromAppConfig 从应用配置创建重试配置
+func ConfigFromAppConfig(appConfig *config.Config) Config {
+	return Config{
+		MaxRetries: appConfig.Retry.MaxRetries,
+		Delay:      time.Duration(appConfig.Retry.DelayMs) * time.Millisecond,
+	}
 }
 
 // QueryRowAndScanWithRetry 带重试的单行查询和扫描
@@ -45,9 +49,10 @@ func QueryRowAndScanWithRetry(db *sql.DB, config Config, query string, args []in
 	return fmt.Errorf("查询在%d次重试后仍然失败: %w", config.MaxRetries, err)
 }
 
-// QueryRowAndScanWithRetryDefault 使用默认配置的单行查询和扫描
-func QueryRowAndScanWithRetryDefault(db *sql.DB, query string, args []interface{}, queryArgs ...interface{}) error {
-	return QueryRowAndScanWithRetry(db, DefaultConfig, query, args, queryArgs...)
+// QueryRowAndScanWithRetryDefault 使用配置文件中的重试配置进行单行查询和扫描
+func QueryRowAndScanWithRetryDefault(db *sql.DB, appConfig *config.Config, query string, args []interface{}, queryArgs ...interface{}) error {
+	retryConfig := ConfigFromAppConfig(appConfig)
+	return QueryRowAndScanWithRetry(db, retryConfig, query, args, queryArgs...)
 }
 
 // QueryWithRetry 带重试的多行查询
@@ -71,7 +76,8 @@ func QueryWithRetry(db *sql.DB, config Config, query string, args ...interface{}
 	return nil, fmt.Errorf("查询在%d次重试后仍然失败: %w", config.MaxRetries, err)
 }
 
-// QueryWithRetryDefault 使用默认配置的多行查询
-func QueryWithRetryDefault(db *sql.DB, query string, args ...interface{}) (*sql.Rows, error) {
-	return QueryWithRetry(db, DefaultConfig, query, args...)
+// QueryWithRetryDefault 使用配置文件中的重试配置进行多行查询
+func QueryWithRetryDefault(db *sql.DB, appConfig *config.Config, query string, args ...interface{}) (*sql.Rows, error) {
+	retryConfig := ConfigFromAppConfig(appConfig)
+	return QueryWithRetry(db, retryConfig, query, args...)
 }

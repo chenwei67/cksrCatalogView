@@ -38,17 +38,47 @@ func (rm *RollbackManager) ExecuteRollback() error {
 		return fmt.Errorf("删除视图失败: %w", err)
 	}
 
-	// 2. 去掉SR表的后缀
+	// 2. 删除Catalog
+	if err := rm.dropCatalog(); err != nil {
+		return fmt.Errorf("删除Catalog失败: %v", err)
+}
+	// 3. 去掉SR表的后缀
 	if err := rm.removeSRTableSuffix(); err != nil {
 		return fmt.Errorf("去掉SR表后缀失败: %w", err)
 	}
 
-	// 3. 删除CK表的带后缀列
+	// 4. 删除CK表的带后缀列
 	if err := rm.dropCKAddedColumns(); err != nil {
 		return fmt.Errorf("删除CK表带后缀列失败: %w", err)
 	}
 
 	logger.Info("回退操作完成，数据库对: %s", rm.pair.Name)
+	return nil
+}
+
+// dropCatalog 删除StarRocks中的Catalog
+func (rm *RollbackManager) dropCatalog() error {
+	logger.Info("正在删除StarRocks Catalog...")
+
+	catalogName := rm.pair.CatalogName
+	if catalogName == "" {
+		// 如果没有配置catalog名称，使用默认格式
+		return fmt.Errorf("catalog 为空，无法删除")
+	}
+
+	// 构建删除Catalog的SQL
+	rollbackBuilder := builder.NewRollbackBuilder("", "")
+	dropCatalogSQL := rollbackBuilder.BuildDropCatalogSQL(catalogName)
+
+	logger.Info("正在删除Catalog: %s", catalogName)
+	logger.Debug("删除Catalog SQL: %s", dropCatalogSQL)
+
+	// 执行删除Catalog的SQL
+	if err := rm.dbManager.ExecuteRollbackSQL([]string{dropCatalogSQL}, false); err != nil {
+		return fmt.Errorf("执行删除Catalog SQL失败: %w", err)
+	}
+
+	logger.Info("成功删除Catalog: %s", catalogName)
 	return nil
 }
 

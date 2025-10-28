@@ -6,6 +6,7 @@ import (
 	"maps"
 	"strings"
 
+	"cksr/config"
 	"cksr/logger"
 	"cksr/parser"
 	"cksr/retry"
@@ -22,6 +23,7 @@ type ViewBuilder struct {
 	viewName  string          // view的名称，就是ck中的name名称
 	dbName    string          // 数据库名称，应该就是sr中的db
 	dbManager DatabaseManager // 数据库管理器，用于执行查询
+	config    *config.Config  // 配置对象，用于获取时间戳列配置
 }
 
 type CKField struct {
@@ -164,7 +166,8 @@ func NewBuilder(
 	fieldConverters []FieldConverter,
 	srFields []parser.Field,
 	ckDBName, ckTableName, ckCatalogName, srDBName, srTableName string,
-	dbManager DatabaseManager) ViewBuilder {
+	dbManager DatabaseManager,
+	cfg *config.Config) ViewBuilder {
 	ckTb := NewCKTableBuilder(fieldConverters, ckTableName, ckDBName, ckCatalogName)
 	srTb := NewSRTableBuilder(srFields, srTableName, srDBName)
 	return ViewBuilder{
@@ -173,6 +176,7 @@ func NewBuilder(
 		viewName:  ckTableName,
 		dbName:    srDBName,
 		dbManager: dbManager,
+		config:    cfg,
 	}
 }
 
@@ -321,17 +325,113 @@ func (v *ViewBuilder) GenAlterViewSQL(ckQ, srQ string) (string, error) {
 	return v.GenViewSQLWithType(ckQ, srQ, "ALTER")
 }
 
+// getTimestampColumnName 根据配置获取指定表的时间戳列名，如果没有配置则返回默认的recordTimestamp
+func (v *ViewBuilder) getTimestampColumnName(tableName string) string {
+	if v.config != nil && v.config.TimestampColumns != nil {
+		// 首先尝试使用完整表名查找配置
+		if columnConfig, exists := v.config.TimestampColumns[tableName]; exists {
+			logger.Debug("表 %s 使用自定义时间戳列名: %s", tableName, columnConfig.Column)
+			return columnConfig.Column
+		}
+
+		// 如果没有找到配置，尝试去除可能的表后缀后再查找
+		// 遍历所有数据库对，检查是否有匹配的后缀
+		for _, pair := range v.config.DatabasePairs {
+			if pair.SRTableSuffix != "" && strings.HasSuffix(tableName, pair.SRTableSuffix) {
+				originalTableName := strings.TrimSuffix(tableName, pair.SRTableSuffix)
+				if columnConfig, exists := v.config.TimestampColumns[originalTableName]; exists {
+					logger.Debug("表 %s (去除后缀 %s 后为 %s) 使用自定义时间戳列名: %s", tableName, pair.SRTableSuffix, originalTableName, columnConfig.Column)
+					return columnConfig.Column
+				}
+			}
+		}
+	}
+	logger.Debug("表 %s 使用默认时间戳列名: recordTimestamp", tableName)
+	return "recordTimestamp"
+}
+
+// getTimestampColumnType 根据配置获取指定表的时间戳列数据类型，如果没有配置则返回默认的bigint
+func (v *ViewBuilder) getTimestampColumnType(tableName string) string {
+	if v.config != nil && v.config.TimestampColumns != nil {
+		// 首先尝试使用完整表名查找配置
+		if columnConfig, exists := v.config.TimestampColumns[tableName]; exists {
+			logger.Debug("表 %s 使用自定义时间戳列类型: %s", tableName, columnConfig.Type)
+			return columnConfig.Type
+		}
+
+		// 如果没有找到配置，尝试去除可能的表后缀后再查找
+		// 遍历所有数据库对，检查是否有匹配的后缀
+		for _, pair := range v.config.DatabasePairs {
+			if pair.SRTableSuffix != "" && strings.HasSuffix(tableName, pair.SRTableSuffix) {
+				originalTableName := strings.TrimSuffix(tableName, pair.SRTableSuffix)
+				if columnConfig, exists := v.config.TimestampColumns[originalTableName]; exists {
+					logger.Debug("表 %s (去除后缀 %s 后为 %s) 使用自定义时间戳列类型: %s", tableName, pair.SRTableSuffix, originalTableName, columnConfig.Type)
+					return columnConfig.Type
+				}
+			}
+		}
+	}
+	return "bigint"
+}
+
+// getDefaultTimestampValue 根据数据类型获取默认的最大时间戳值
+func (v *ViewBuilder) getDefaultTimestampValue(dataType string) (string, error) {
+	switch strings.ToLower(dataType) {
+	case "date":
+		return "'9999-12-31'", nil
+	case "datetime":
+		return "'9999-12-31 23:59:59'", nil
+	case "bigint":
+		return "9999999999999", nil
+	default:
+		return "", fmt.Errorf("不支持的时间戳数据类型: %s，仅支持date、datetime、bigint", dataType)
+	}
+}
+
+// formatTimestampValue 根据数据类型格式化时间戳值
+func (v *ViewBuilder) formatTimestampValue(value string, dataType string) (string, error) {
+	switch strings.ToLower(dataType) {
+	case "date", "datetime":
+		// 对于日期时间类型，需要用单引号包围
+		if !strings.HasPrefix(value, "'") {
+			return fmt.Sprintf("'%s'", value), nil
+		}
+		return value, nil
+	case "bigint":
+		// 对于数字类型，直接返回
+		return value, nil
+	default:
+		return "", fmt.Errorf("不支持的时间戳数据类型: %s，仅支持date、datetime、bigint", dataType)
+	}
+}
+
+// func (v *ViewBuilder) GenViewSQLWithType(ckQ, srQ string, sqlType string) (string, error) {
+// 	logger.Debug("开始生成视图SQL (类型: %s)", sqlType)
+// 	logger.Debug("ClickHouse查询SQL: %s", ckQ)
+// 	logger.Debug("StarRocks查询SQL: %s", srQ)
+
+// 	// 先执行子查询获取固定的时间值
+// 	minTimestampQuery := fmt.Sprintf("select min(recordTimestamp) from %s.%s", v.sr.DBName, v.sr.Name)
+// 	logger.Debug("执行子查询获取最小时间戳: %s", minTimestampQuery)
+
+// 	// 查询最小时间戳，使用通用的重试wrapper
+// 	var nullableTimestamp *int64
+// 	var minTimestamp string
+
 func (v *ViewBuilder) GenViewSQLWithType(ckQ, srQ string, sqlType string) (string, error) {
 	logger.Debug("开始生成视图SQL (类型: %s)", sqlType)
 	logger.Debug("ClickHouse查询SQL: %s", ckQ)
 	logger.Debug("StarRocks查询SQL: %s", srQ)
 
+	// 获取时间戳列名和数据类型
+	timestampColumn := v.getTimestampColumnName(v.sr.Name)
+	timestampType := v.getTimestampColumnType(v.sr.Name)
+
 	// 先执行子查询获取固定的时间值
-	minTimestampQuery := fmt.Sprintf("select min(recordTimestamp) from %s.%s", v.sr.DBName, v.sr.Name)
+	minTimestampQuery := fmt.Sprintf("select min(%s) from %s.%s", timestampColumn, v.sr.DBName, v.sr.Name)
 	logger.Debug("执行子查询获取最小时间戳: %s", minTimestampQuery)
 
 	// 查询最小时间戳，使用通用的重试wrapper
-	var nullableTimestamp *int64
 	var minTimestamp string
 
 	db, err := v.dbManager.GetStarRocksConnection()
@@ -340,31 +440,69 @@ func (v *ViewBuilder) GenViewSQLWithType(ckQ, srQ string, sqlType string) (strin
 	}
 	defer db.Close()
 
-	err = retry.QueryRowAndScanWithRetryDefault(db, minTimestampQuery, []interface{}{&nullableTimestamp})
-	if err != nil {
-		// 检查是否是没有数据的错误
-		if err == sql.ErrNoRows {
-			logger.Warn("表中没有数据，使用最大默认值")
-			minTimestamp = "9999999999999"
+	// 根据数据类型选择不同的扫描方式
+	switch strings.ToLower(timestampType) {
+	case "datetime", "date":
+		var nullableTimestamp *string
+		err = retry.QueryRowAndScanWithRetryDefault(db, v.config, minTimestampQuery, []interface{}{&nullableTimestamp})
+		if err != nil {
+			if err == sql.ErrNoRows {
+				logger.Warn("表中没有数据，使用最大默认值")
+				minTimestamp, err = v.getDefaultTimestampValue(timestampType)
+				if err != nil {
+					return "", fmt.Errorf("获取默认时间戳值失败: %w", err)
+				}
+			} else {
+				return "", fmt.Errorf("查询最小时间戳失败: %w", err)
+			}
+		} else if nullableTimestamp == nil {
+			logger.Warn("查询最小时间戳结果为NULL，使用最大默认值")
+			minTimestamp, err = v.getDefaultTimestampValue(timestampType)
+			if err != nil {
+				return "", fmt.Errorf("获取默认时间戳值失败: %w", err)
+			}
 		} else {
-			return "", fmt.Errorf("查询最小时间戳失败: %w", err)
+			minTimestamp, err = v.formatTimestampValue(*nullableTimestamp, timestampType)
+			if err != nil {
+				return "", fmt.Errorf("格式化时间戳值失败: %w", err)
+			}
+			logger.Debug("获取到最小时间戳: %s", minTimestamp)
 		}
-	} else if nullableTimestamp == nil {
-		logger.Warn("查询最小时间戳结果为NULL，使用最大默认值")
-		minTimestamp = "9999999999999"
-	} else {
-		minTimestamp = fmt.Sprintf("%d", *nullableTimestamp)
-		logger.Debug("获取到最小时间戳: %s", minTimestamp)
+	case "bigint":
+		var nullableTimestamp *int64
+		err = retry.QueryRowAndScanWithRetryDefault(db, v.config, minTimestampQuery, []interface{}{&nullableTimestamp})
+		if err != nil {
+			if err == sql.ErrNoRows {
+				logger.Warn("表中没有数据，使用最大默认值")
+				minTimestamp, err = v.getDefaultTimestampValue(timestampType)
+				if err != nil {
+					return "", fmt.Errorf("获取默认时间戳值失败: %w", err)
+				}
+			} else {
+				return "", fmt.Errorf("查询最小时间戳失败: %w", err)
+			}
+		} else if nullableTimestamp == nil {
+			logger.Warn("查询最小时间戳结果为NULL，使用最大默认值")
+			minTimestamp, err = v.getDefaultTimestampValue(timestampType)
+			if err != nil {
+				return "", fmt.Errorf("获取默认时间戳值失败: %w", err)
+			}
+		} else {
+			minTimestamp = fmt.Sprintf("%d", *nullableTimestamp)
+			logger.Debug("获取到最小时间戳: %s", minTimestamp)
+		}
+	default:
+		return "", fmt.Errorf("未知的时间戳数据类型: %s", timestampType)
 	}
-
 	// 根据SQL类型生成不同的语句
 	var sql string
+	// 生成视图SQL，ClickHouse使用 < 条件，StarRocks使用 >= 条件
+	sql = fmt.Sprintf("%s.%s as \n%s \nwhere %s < %s \nunion all \n%s \nwhere %s >= %s; \n",
+		v.dbName, v.viewName, ckQ, timestampColumn, minTimestamp, srQ, timestampColumn, minTimestamp)
 	if sqlType == "ALTER" {
-		sql = fmt.Sprintf("alter view %s.%s as \n%s \nwhere recordTimestamp < %s \nunion all \n%s \nwhere recordTimestamp >= %s; \n",
-			v.dbName, v.viewName, ckQ, minTimestamp, srQ, minTimestamp)
+		sql = "alter view " + sql
 	} else {
-		sql = fmt.Sprintf("create view if not exists %s.%s as \n%s \nwhere recordTimestamp < %s \nunion all \n%s \nwhere recordTimestamp >= %s; \n",
-			v.dbName, v.viewName, ckQ, minTimestamp, srQ, minTimestamp)
+		sql = "create view if not exists " + sql
 	}
 
 	logger.Debug("最终视图SQL:\n%s", sql)

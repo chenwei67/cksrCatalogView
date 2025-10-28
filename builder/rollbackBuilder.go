@@ -30,6 +30,14 @@ func (r RollbackBuilder) BuildDropViewSQL() string {
 	return sql
 }
 
+// BuildDropCatalogSQL 构建删除Catalog的SQL
+func (r RollbackBuilder) BuildDropCatalogSQL(catalogName string) string {
+	logger.Debug("RollbackBuilder.BuildDropCatalogSQL() 构建删除Catalog SQL: %s", catalogName)
+	sql := fmt.Sprintf("DROP CATALOG IF EXISTS `%s`", catalogName)
+	logger.Debug("RollbackBuilder.BuildDropCatalogSQL() 生成SQL: %s", sql)
+	return sql
+}
+
 // BuildDropCKColumnSQL 构建删除ClickHouse表中带后缀列的SQL
 func (r RollbackBuilder) BuildDropCKColumnSQL(columnName string) string {
 	logger.Debug("RollbackBuilder.BuildDropCKColumnSQL() 构建删除CK列SQL: %s.%s.%s", r.dbName, r.tableName, columnName)

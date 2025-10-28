@@ -9,8 +9,8 @@
 package parser
 
 import (
-	"cksr/logger"
 	"strings"
+	"cksr/logger"
 )
 
 func pass(s string) bool {

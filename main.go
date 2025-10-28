@@ -249,8 +249,7 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 		// 检查StarRocks表是否为VIEW
 		isView, err := dbPairManager.CheckStarRocksTableIsView(tableName)
 		if err != nil {
-			logger.Warn("检查表 %s 类型失败: %v，跳过处理", tableName, err)
-			continue
+			return fmt.Errorf("检查表 %s 类型失败: %v", tableName, err)
 		}
 
 		if isView {
@@ -302,7 +301,6 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 			logger.Debug("数据库: %s.%s", ckTable.DDL.DBName, ckTable.DDL.TableName)
 			logger.Debug("SQL内容:\n%s", alterSQL)
 			logger.Debug("=== ALTER SQL语句结束 ===")
-
 			logger.Debug("执行ClickHouse ALTER TABLE语句: %s", alterSQL)
 			if err := dbPairManager.ExecuteBatchSQL([]string{alterSQL}, true); err != nil {
 				logger.Error("执行ClickHouse ALTER TABLE语句失败: %v", err)
@@ -344,7 +342,6 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 
 		// 步骤3: 构建并执行StarRocks VIEW SQL
 		logger.Info("步骤3: 构建并执行StarRocks表 %s 的VIEW SQL", tableName)
-
 		// 重新解析StarRocks表结构，使用重命名后的表名
 		logger.Debug("正在重新获取StarRocks表DDL (重命名后表名: %s)...", renamedTableName)
 		srDDLAfterRename, err := dbPairManager.GetStarRocksTableDDL(renamedTableName)
@@ -369,6 +366,7 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 			ckTable.DDL.DBName, ckTable.DDL.TableName, catalogName,
 			srTableAfterRename.DDL.DBName, srTableAfterRename.DDL.TableName,
 			dbPairManager,
+			cfg,
 		)
 		logger.Debug("VIEW builder创建完成")
 
@@ -386,7 +384,6 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, fileManage
 			logger.Debug("视图名: %s.%s", pair.StarRocks.Database, tableName)
 			logger.Debug("SQL内容:\n%s", viewSQL)
 			logger.Debug("=== VIEW SQL语句结束 ===")
-
 			logger.Debug("执行CREATE VIEW语句: %s", viewSQL)
 			// 使用重试机制执行CREATE VIEW语句，因为依赖于前面的操作
 			if err := dbPairManager.ExecuteBatchSQL([]string{viewSQL}, false); err != nil {
