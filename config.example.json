@@ -19,34 +19,10 @@
         "password": "StarRocks!@2025#.",
         "database": "business"
       }
-    },
-    {
-      "name": "cold",
-      "catalog_name": "cold_catalog",
-      "sr_table_suffix": "_local_catalog",
-      "clickhouse": {
-        "host": "10.117.64.12",
-        "port": 31004,
-        "http_port": 31003,
-        "username": "root",
-        "password": "QmDunBxpfMpFbydK9P2y",
-        "database": "dspm"
-      },
-      "starrocks": {
-        "host": "10.107.29.99",
-        "port": 30938,
-        "username": "root",
-        "password": "",
-        "database": "dspm"
-      }
     }
   ],
   "ignore_tables": [
-    "asset_infer",
-    "http_log_statistics_by_day",
-    "http_log_statistics_by_day_mv",
-    "label_count_by_day",
-    "label_count_by_day_mv"
+    "asset_infer"
   ],
   "timestamp_columns": {
     "datalake_report_log": {
@@ -87,7 +63,7 @@
     "lock_duration_seconds": 300
   },
   "retry": {
-    "max_retries": 10,
+    "max_retries": 20,
     "delay_ms": 500
   }
 }
