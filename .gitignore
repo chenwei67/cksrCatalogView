@@ -35,9 +35,6 @@ go.work
 ehthumbs.db
 Thumbs.db
 
-# Configuration files (keep example)
-config.json
-*.local.json
 
 # Temporary files
 temp/
@@ -60,6 +57,3 @@ k8s/*secret*.yaml
 .env
 .env.local
 .env.*.local
-
-
-sql

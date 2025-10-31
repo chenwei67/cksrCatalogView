@@ -21,15 +21,15 @@ import (
 )
 
 func main() {
-	var configPath string
-	var logLevel string
-	var rollback bool
+    var configPath string
+    var logLevel string
+    var mode string
 
 	// 定义命令行参数
-	flag.StringVar(&configPath, "config", "", "配置文件路径")
-	flag.StringVar(&logLevel, "log-level", "INFO", "日志级别 (SILENT, ERROR, WARN, INFO, DEBUG)")
-	flag.BoolVar(&rollback, "rollback", false, "执行回退操作：删除所有视图、删除SR表新增列、去掉SR表后缀、删除CK表带后缀的列")
-	flag.Parse()
+    flag.StringVar(&configPath, "config", "", "配置文件路径")
+    flag.StringVar(&logLevel, "log-level", "INFO", "日志级别 (SILENT, ERROR, WARN, INFO, DEBUG)")
+    flag.StringVar(&mode, "mode", "", "运行模式：init(仅初始化并创建视图)、update(仅常驻更新视图)、rollback(回滚删除视图及相关变更)")
+    flag.Parse()
 
 	// 检查环境变量LOG_LEVEL，如果设置了则优先使用
 	if envLogLevel := os.Getenv("LOG_LEVEL"); envLogLevel != "" {
@@ -76,81 +76,90 @@ func main() {
 		logger.Info("从配置文件设置日志级别为: %s", logger.LogLevelString(logger.GetCurrentLevel()))
 	}
 
-	// 确保程序退出时关闭日志文件
-	defer logger.CloseLogFile()
+    // 确保程序退出时关闭日志文件
+    defer logger.CloseLogFile()
 
-	// 如果是回退模式，执行回退操作
-	if rollback {
-		logger.Info("开始执行回退操作...")
-		if err := ExecuteRollbackForAllPairs(cfg); err != nil {
-			log.Fatalf("回退操作失败: %v", err)
-		}
-		log.Println("回退操作完成")
-		return
-	}
+    // 必须显式指定运行模式
+    if strings.TrimSpace(mode) == "" {
+        log.Fatalf("未指定运行模式: 请使用 -mode=<init|update|rollback>")
+    }
 
-	// 处理多个数据库对
-	for i, pair := range cfg.DatabasePairs {
-		log.Printf("开始处理数据库对 %s (索引: %d)", pair.Name, i)
+    // 根据模式执行不同逻辑
+    switch strings.ToLower(mode) {
+    case "rollback":
+        logger.Info("运行模式: rollback — 开始执行回退操作...")
+        if err := ExecuteRollbackForAllPairs(cfg); err != nil {
+            log.Fatalf("回退操作失败: %v", err)
+        }
+        log.Println("回退操作完成")
+        return
+    case "init":
+        logger.Info("运行模式: init — 仅初始化并创建视图")
+        // 处理多个数据库对（创建/同步视图）
+        for i, pair := range cfg.DatabasePairs {
+            log.Printf("开始处理数据库对 %s (索引: %d)", pair.Name, i)
 
-		dbManager := database.NewDatabasePairManager(cfg, i)
-		fileManager := fileops.NewFileManager(cfg.TempDir)
+            dbManager := database.NewDatabasePairManager(cfg, i)
+            fileManager := fileops.NewFileManager(cfg.TempDir)
 
-		if err := processDatabasePair(dbManager, fileManager, cfg, pair); err != nil {
-			log.Fatalf("处理数据库对 %s 失败: %v", pair.Name, err)
-		}
+            if err := processDatabasePair(dbManager, fileManager, cfg, pair); err != nil {
+                log.Fatalf("处理数据库对 %s 失败: %v", pair.Name, err)
+            }
 
-		log.Printf("数据库对 %s 处理完成", pair.Name)
-	}
+            log.Printf("数据库对 %s 处理完成", pair.Name)
+        }
 
-	log.Println("所有数据库对处理完成")
+        log.Println("所有数据库对处理完成 (init)")
+        // init 模式下不启动视图更新器，直接退出
+        return
+    case "update":
+        logger.Info("运行模式: update — 启动常驻视图更新器")
+        // 仅启动视图更新器，不做初始化处理
+        logger.Info("启动视图更新器...")
 
-	// 启动视图更新器（仅在正常运行模式下）
-	if cfg.ViewUpdater.Enabled {
-		logger.Info("启动视图更新器...")
+        // 创建视图更新器配置（在 update 模式下强制启用）
+        updaterConfig := &updater.ViewUpdaterConfig{
+            Enabled:        true,
+            CronExpression: cfg.ViewUpdater.CronExpression,
+            DebugMode:      cfg.ViewUpdater.DebugMode,
+            K8sNamespace:   cfg.ViewUpdater.K8sNamespace,
+            LeaseName:      cfg.ViewUpdater.LeaseName,
+            Identity:       cfg.ViewUpdater.Identity,
+            LockDuration:   time.Duration(cfg.ViewUpdater.LockDurationSeconds) * time.Second,
+        }
 
-		// 创建视图更新器配置
-		updaterConfig := &updater.ViewUpdaterConfig{
-			Enabled:        cfg.ViewUpdater.Enabled,
-			CronExpression: cfg.ViewUpdater.CronExpression,
-			DebugMode:      cfg.ViewUpdater.DebugMode,
-			K8sNamespace:   cfg.ViewUpdater.K8sNamespace,
-			LeaseName:      cfg.ViewUpdater.LeaseName,
-			Identity:       cfg.ViewUpdater.Identity,
-			LockDuration:   time.Duration(cfg.ViewUpdater.LockDurationSeconds) * time.Second,
-		}
+        // 创建并启动视图更新器
+        viewUpdater, err := updater.NewViewUpdater(cfg, updaterConfig)
+        if err != nil {
+            logger.Error("创建视图更新器失败: %v", err)
+            logger.Info("程序将正常退出")
+            return
+        }
 
-		// 创建并启动视图更新器
-		viewUpdater, err := updater.NewViewUpdater(cfg, updaterConfig)
-		if err != nil {
-			logger.Error("创建视图更新器失败: %v", err)
-			logger.Info("程序将正常退出")
-			return
-		}
+        if err := viewUpdater.Start(); err != nil {
+            logger.Error("启动视图更新器失败: %v", err)
+            logger.Info("程序将正常退出")
+            return
+        }
 
-		if err := viewUpdater.Start(); err != nil {
-			logger.Error("启动视图更新器失败: %v", err)
-			logger.Info("程序将正常退出")
-			return
-		}
+        logger.Info("视图更新器启动成功，将在后台持续运行")
 
-		logger.Info("视图更新器启动成功，将在后台持续运行")
+        // 创建信号通道，监听系统信号
+        sigChan := make(chan os.Signal, 1)
+        signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-		// 创建信号通道，监听系统信号
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-		// 等待信号或程序退出
-		select {
-		case sig := <-sigChan:
-			logger.Info("接收到信号 %v，程序即将退出", sig)
-			logger.Info("正在关闭视图更新器...")
-			viewUpdater.Stop()
-			logger.Info("视图更新器已关闭")
-		}
-	} else {
-		logger.Info("视图更新器未启用，程序正常退出")
-	}
+        // 等待信号或程序退出
+        select {
+        case sig := <-sigChan:
+            logger.Info("接收到信号 %v，程序即将退出", sig)
+            logger.Info("正在关闭视图更新器...")
+            viewUpdater.Stop()
+            logger.Info("视图更新器已关闭")
+        }
+        return
+    default:
+        log.Fatalf("未知的运行模式: %s (支持: init, update, rollback)", mode)
+    }
 }
 
 // processDatabasePair 处理单个数据库对的完整流程
