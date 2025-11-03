@@ -41,10 +41,7 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, cfg *confi
 
 	logger.Info("正在创建StarRocks Catalog...")
 	catalogName := pair.CatalogName
-	if catalogName == "" {
-		catalogName = fmt.Sprintf("clickhouse_catalog_%s", pairName)
-	}
-	if err := dbPairManager.CreateStarRocksCatalog(catalogName); err != nil {
+	if err := dbPairManager.CreateStarRocksCatalog(pair.CatalogName); err != nil {
 		return fmt.Errorf("创建StarRocks Catalog失败: %w", err)
 	}
 
