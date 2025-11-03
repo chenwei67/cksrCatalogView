@@ -169,7 +169,7 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, cfg *confi
 			} else {
 				isNative, err := dbPairManager.CheckStarRocksTableIsNative(tableName)
 				if err != nil {
-					logger.Warn("检查表 %s 类型失败: %v，跳过重命名", tableName, err)
+					return fmt.Errorf("检查表 %s 类型失败: %w", tableName, err)
 				} else if isNative {
 					newTableName := tableName + suffix
 					renameSQL := fmt.Sprintf("ALTER TABLE `%s`.`%s` RENAME `%s`",

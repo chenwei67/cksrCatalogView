@@ -136,8 +136,7 @@ func (rm *RollbackManager) removeSRTableSuffix() error {
         if strings.HasSuffix(tableName, suffix) {
             isView, err := rm.dbManager.CheckStarRocksTableIsView(tableName)
             if err != nil {
-                logger.Warn("检查表 %s 类型失败: %v，跳过", tableName, err)
-                continue
+                return fmt.Errorf("检查表 %s 是否为视图失败: %w", tableName, err)
             }
             if isView {
                 logger.Debug("跳过VIEW表: %s", tableName)
@@ -145,8 +144,7 @@ func (rm *RollbackManager) removeSRTableSuffix() error {
             }
             isNative, err := rm.dbManager.CheckStarRocksTableIsNative(tableName)
             if err != nil {
-                logger.Warn("检查表 %s 类型失败: %v，跳过", tableName, err)
-                continue
+                return fmt.Errorf("检查表 %s 是否为原生表失败: %w", tableName, err)
             }
             if !isNative {
                 logger.Debug("跳过非native表: %s", tableName)

@@ -231,6 +231,10 @@ func (vu *ViewUpdater) getAllViews(srDB *sql.DB, database string) ([]string, err
         views = append(views, viewName)
     }
 
+    if err := rows.Err(); err != nil {
+        return nil, fmt.Errorf("遍历视图列表失败: %w", err)
+    }
+
     return views, nil
 }
 

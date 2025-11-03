@@ -9,16 +9,22 @@
 package database
 
 import (
-	"database/sql"
-	"fmt"
-	"strings"
+    "database/sql"
+    "fmt"
+    "strings"
 
-	"cksr/config"
-	"cksr/logger"
-	"cksr/retry"
+    "cksr/config"
+    "cksr/logger"
+    "cksr/retry"
 
-	_ "github.com/ClickHouse/clickhouse-go"
-	_ "github.com/go-sql-driver/mysql"
+    _ "github.com/ClickHouse/clickhouse-go"
+    _ "github.com/go-sql-driver/mysql"
+)
+
+// ClickHouse 设置项常量，避免使用魔字符串
+const (
+    // 分布式 DDL 任务超时设置键名
+    ClickHouseSettingDistributedDDLTaskTimeout = "distributed_ddl_task_timeout"
 )
 
 // DatabasePairManager 数据库对管理器
@@ -107,18 +113,21 @@ func (dm *DatabasePairManager) ExportClickHouseTables() (map[string]string, erro
 	for rows.Next() {
 		var tableName string
 		if err := rows.Scan(&tableName); err != nil {
-			continue
+			return nil, fmt.Errorf("扫描表名失败: %w", err)
 		}
 
 		// 使用重试机制获取表的创建语句
 		createQuery := fmt.Sprintf("SHOW CREATE TABLE %s", tableName)
 		var createStatement string
 		if err := retry.QueryRowAndScanWithRetryDefault(db, dm.config, createQuery, []interface{}{&createStatement}); err != nil {
-			logger.Warn("获取表 %s 的创建语句失败: %v", tableName, err)
-			continue
+			return nil, fmt.Errorf("获取表 %s 的创建语句失败: %w", tableName, err)
 		}
 
 		result[tableName] = createStatement
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历表列表失败: %w", err)
 	}
 
 	return result, nil
@@ -145,9 +154,13 @@ func (dm *DatabasePairManager) GetStarRocksTableNames() ([]string, error) {
 	for rows.Next() {
 		var tableName string
 		if err := rows.Scan(&tableName); err != nil {
-			continue
+			return nil, fmt.Errorf("扫描表名失败: %w", err)
 		}
 		tableNames = append(tableNames, tableName)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历表列表失败: %w", err)
 	}
 
 	return tableNames, nil
@@ -156,6 +169,7 @@ func (dm *DatabasePairManager) GetStarRocksTableNames() ([]string, error) {
 // GetStarRocksTableDDL 获取StarRocks表的DDL（使用通用重试wrapper）
 func (dm *DatabasePairManager) GetStarRocksTableDDL(tableName string) (string, error) {
 	var ddl string
+	var name string
 
 	db, err := dm.GetStarRocksConnection()
 	if err != nil {
@@ -165,8 +179,8 @@ func (dm *DatabasePairManager) GetStarRocksTableDDL(tableName string) (string, e
 
 	pair := dm.config.DatabasePairs[dm.pairIndex]
 	createQuery := fmt.Sprintf("SHOW CREATE TABLE `%s`.`%s`", pair.StarRocks.Database, tableName)
-	
-	err = retry.QueryRowAndScanWithRetryDefault(db, dm.config, createQuery, []interface{}{&tableName, &ddl})
+
+	err = retry.QueryRowAndScanWithRetryDefault(db, dm.config, createQuery, []interface{}{&name, &ddl})
 	if err != nil {
 		return "", fmt.Errorf("获取表 %s 的DDL失败: %w", tableName, err)
 	}
@@ -176,24 +190,28 @@ func (dm *DatabasePairManager) GetStarRocksTableDDL(tableName string) (string, e
 
 // ExecuteClickHouseSQL 执行ClickHouse SQL
 func (dm *DatabasePairManager) ExecuteClickHouseSQL(sql string) error {
-	db, err := dm.GetClickHouseConnection()
-	if err != nil {
-		return err
-	}
-	defer db.Close()
+    db, err := dm.GetClickHouseConnection()
+    if err != nil {
+        return err
+    }
+    defer db.Close()
 
-	// 增加分布式 DDL 超时时间，避免 ON CLUSTER 任务因超时而提前返回错误
-	if _, setErr := db.Exec("SET distributed_ddl_task_timeout = 3600"); setErr != nil {
-		logger.Warn("设置 ClickHouse 分布式DDL超时失败: %v", setErr)
-	}
-
-	_, err = db.Exec(sql)
-	// 如果是分布式DDL超时（错误码 159），视为非致命错误，任务会在后台继续执行
-	if isDistributedDDLTimeout(err) {
-		logger.Warn("分布式DDL任务超过超时时间，后台继续执行: %v", err)
-		return nil
-	}
-	return err
+    // 增加分布式 DDL 超时时间，避免 ON CLUSTER 任务因超时而提前返回错误（从CK配置读取）
+    pair := dm.config.DatabasePairs[dm.pairIndex]
+    timeout := pair.ClickHouse.DistributedDDLTaskTimeoutSeconds
+    if timeout <= 0 {
+        timeout = 3600
+    }
+    if _, setErr := db.Exec(fmt.Sprintf("SET %s = %d", ClickHouseSettingDistributedDDLTaskTimeout, timeout)); setErr != nil {
+        return fmt.Errorf("设置 ClickHouse 分布式DDL超时失败: %w", setErr)
+    }
+    // 执行原始 SQL（不注入 query_id，兼容旧版本）
+    _, err = db.Exec(sql)
+    // 如果是分布式DDL超时（错误码 159），按错误处理并返回
+    if isDistributedDDLTimeout(err) {
+        return fmt.Errorf("ClickHouse 分布式DDL超时(159): %w", err)
+    }
+    return err
 }
 
 // ExecuteStarRocksSQL 执行StarRocks SQL
@@ -270,37 +288,17 @@ func (dm *DatabasePairManager) ExecuteBatchSQL(sqlStatements []string, isClickHo
 
 // isDistributedDDLTimeout 判断是否为 ClickHouse 分布式 DDL 超时错误（错误码 159）
 func isDistributedDDLTimeout(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	if strings.Contains(msg, "distributed_ddl_task_timeout") {
-		return true
-	}
-	if strings.Contains(msg, "code: 159") {
-		return true
-	}
-	return false
-}
-
-// isStarRocksSchemaChangeInProgress 判断StarRocks是否处于表结构变更进行中的错误
-// 该错误常见提示为："A schema change operation is in progress on the table ..."
-// 以及文档链接提示 SHOW_ALT（不同版本提示文本可能略有差异）
-func isStarRocksSchemaChangeInProgress(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	if strings.Contains(msg, "schema change operation is in progress") {
-		return true
-	}
-	if strings.Contains(msg, "show_alt") {
-		return true
-	}
-	if strings.Contains(msg, "error 1064") && strings.Contains(msg, "schema change") {
-		return true
-	}
-	return false
+    if err == nil {
+        return false
+    }
+    msg := strings.ToLower(err.Error())
+    if strings.Contains(msg, ClickHouseSettingDistributedDDLTaskTimeout) {
+        return true
+    }
+    if strings.Contains(msg, "code: 159") {
+        return true
+    }
+    return false
 }
 
 // GetPairName 获取数据库对名称
