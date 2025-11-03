@@ -2,13 +2,13 @@
 
 # 比较当前目录下 database-sql 子目录的 .sql 文件名与 StarRocks 中（剔除指定后缀后）的表名差异
 # 使用方法：
-#   ./compare_sql_sr_tables.sh [配置文件路径(默认./config.example.json)] [SQL目录(默认./database-sql)]
+#   ./compare_sql_sr_tables.sh [配置文件路径(默认./config.json)] [SQL目录(默认./database-sql)]
 # 示例：
-#   ./compare_sql_sr_tables.sh /d/Users/User/Desktop/cksr/config.example.json ./database-sql
+#   ./compare_sql_sr_tables.sh /d/Users/User/Desktop/cksr/config.json ./database-sql
 
 set -e
 
-CONFIG_FILE="${1:-./config.example.json}"
+CONFIG_FILE="${1:-./config.json}"
 SQL_DIR="${2:-./database-sql}"
 
 # 依赖检查

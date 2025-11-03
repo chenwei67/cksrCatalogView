@@ -45,21 +45,10 @@ type LogConfig struct {
 
 // ViewUpdaterConfig 视图更新器配置
 type ViewUpdaterConfig struct {
-	// 是否启用视图更新器
-	Enabled bool `json:"enabled"`
 	// Cron表达式，定义更新时间
 	CronExpression string `json:"cron_expression"`
-	// 是否启用调试模式（使用虚拟锁）
-	DebugMode bool `json:"debug_mode"`
-	// K8s命名空间（非调试模式时使用）
-	K8sNamespace string `json:"k8s_namespace"`
-	// Lease名称
-	LeaseName string `json:"lease_name"`
-	// 实例标识
-	Identity string `json:"identity"`
-	// 锁持有时间（秒）
-	LockDurationSeconds int `json:"lock_duration_seconds"`
 }
+
 // TimestampColumnConfig 时间戳列配置
 type TimestampColumnConfig struct {
 	// 列名，用于替换默认的recordTimestamp
@@ -93,6 +82,22 @@ type Config struct {
 	Retry     RetryConfig `json:"retry"`
 	// 视图更新器配置
 	ViewUpdater ViewUpdaterConfig `json:"view_updater"`
+	// 公共分布式锁配置
+	Lock LockConfig `json:"lock"`
+}
+
+// LockConfig 公共分布式锁配置
+type LockConfig struct {
+	// 是否启用调试模式（使用虚拟锁）
+	DebugMode bool `json:"debug_mode"`
+	// K8s命名空间（非调试模式时使用）
+	K8sNamespace string `json:"k8s_namespace"`
+	// Lease名称
+	LeaseName string `json:"lease_name"`
+	// 基础实例标识（业务可在此基础上追加后缀）
+	Identity string `json:"identity"`
+	// 锁持有时间（秒）
+	LockDurationSeconds int `json:"lock_duration_seconds"`
 }
 
 // LoadConfig 从配置文件加载配置
@@ -112,28 +117,24 @@ func LoadConfig(configPath string) (*Config, error) {
 		config.TempDir = "./temp"
 	}
 
-	// 设置日志配置默认值
-	if config.Log.LogLevel == "" {
-		config.Log.LogLevel = "INFO"
-	}
-
 	// 设置视图更新器配置默认值
 	if config.ViewUpdater.CronExpression == "" {
 		config.ViewUpdater.CronExpression = "0 0 2 * * *" // 每天凌晨2点
 	}
-	if config.ViewUpdater.K8sNamespace == "" {
-		config.ViewUpdater.K8sNamespace = "default"
+	// 设置公共锁配置默认值（不回退到 view_updater，只以 lock 为准）
+	if config.Lock.K8sNamespace == "" {
+		config.Lock.K8sNamespace = "olap"
 	}
-	if config.ViewUpdater.LeaseName == "" {
-		config.ViewUpdater.LeaseName = "cksr-view-updater"
+	if config.Lock.LeaseName == "" {
+		config.Lock.LeaseName = "cksr-lock"
 	}
-	if config.ViewUpdater.Identity == "" {
-		config.ViewUpdater.Identity = "cksr-instance"
+	if config.Lock.Identity == "" {
+		config.Lock.Identity = "cksr-instance"
 	}
-	if config.ViewUpdater.LockDurationSeconds == 0 {
-		config.ViewUpdater.LockDurationSeconds = 300 // 5分钟
+	if config.Lock.LockDurationSeconds == 0 {
+		config.Lock.LockDurationSeconds = 300
 	}
-	
+
 	// 设置重试配置默认值
 	if config.Retry.MaxRetries == 0 {
 		config.Retry.MaxRetries = 3

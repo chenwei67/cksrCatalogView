@@ -54,11 +54,12 @@
     "log_level": "DEBUG"
   },
   "view_updater": {
-    "enabled": true,
-    "cron_expression": "*/10 * * * * *",
+    "cron_expression": "*/10 * * * * *"
+  },
+  "lock": {
     "debug_mode": true,
-    "k8s_namespace": "default",
-    "lease_name": "cksr-view-updater",
+    "k8s_namespace": "olap",
+    "lease_name": "cksr-lock",
     "identity": "cksr-instance",
     "lock_duration_seconds": 300
   },

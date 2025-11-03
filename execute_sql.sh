@@ -1,12 +1,12 @@
 #!/bin/bash
 
 # StarRocks SQL执行脚本
-# 根据config.example.json中的配置连接StarRocks数据库并执行SQL文件
+# 根据config.json中的配置连接StarRocks数据库并执行SQL文件
 
 set -e  # 遇到错误时退出
 
 # 默认配置文件路径
-CONFIG_FILE="${1:-./config.example.json}"
+CONFIG_FILE="${1:-./config.json}"
 SQL_DIR="${2:-./database-sql}"
 
 # 检查配置文件是否存在
