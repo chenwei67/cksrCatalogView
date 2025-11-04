@@ -93,8 +93,10 @@ type Config struct {
 	Retry     RetryConfig `json:"retry"`
 	// 视图更新器配置
 	ViewUpdater ViewUpdaterConfig `json:"view_updater"`
-	// 公共分布式锁配置
-	Lock LockConfig `json:"lock"`
+    // 公共分布式锁配置
+    Lock LockConfig `json:"lock"`
+    // 回滚策略配置
+    Rollback RollbackConfig `json:"rollback"`
 }
 
 // LockConfig 公共分布式锁配置
@@ -109,6 +111,12 @@ type LockConfig struct {
 	Identity string `json:"identity"`
 	// 锁持有时间（秒）
 	LockDurationSeconds int `json:"lock_duration_seconds"`
+}
+
+// RollbackConfig 回滚策略配置
+type RollbackConfig struct {
+    // 策略："stop_on_error" 或 "continue_on_error"
+    Strategy string `json:"strategy"`
 }
 
 // LoadConfig 从配置文件加载配置
@@ -142,9 +150,14 @@ func LoadConfig(configPath string) (*Config, error) {
 	if config.Lock.Identity == "" {
 		config.Lock.Identity = "cksr-instance"
 	}
-	if config.Lock.LockDurationSeconds == 0 {
-		config.Lock.LockDurationSeconds = 300
-	}
+    if config.Lock.LockDurationSeconds == 0 {
+        config.Lock.LockDurationSeconds = 300
+    }
+
+    // 设置回滚策略默认值
+    if config.Rollback.Strategy == "" {
+        config.Rollback.Strategy = "stop_on_error"
+    }
 
 	// 设置重试配置默认值
 	if config.Retry.MaxRetries == 0 {
@@ -159,17 +172,25 @@ func LoadConfig(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("至少需要配置一个数据库对")
 	}
 
-	for _, pair := range config.DatabasePairs {
-		if pair.Name == "" {
-			return nil, fmt.Errorf("数据库对缺少 Name")
-		}
-		if pair.CatalogName == "" {
-			return nil, fmt.Errorf("数据库对 %s 缺少 CatalogName", pair.Name)
-		}
-		if pair.SRTableSuffix == "" {
-			return nil, fmt.Errorf("数据库对 %s 缺少 SRTableSuffix", pair.Name)
-		}
-	}
+    for _, pair := range config.DatabasePairs {
+        if pair.Name == "" {
+            return nil, fmt.Errorf("数据库对缺少 Name")
+        }
+        if pair.CatalogName == "" {
+            return nil, fmt.Errorf("数据库对 %s 缺少 CatalogName", pair.Name)
+        }
+        if pair.SRTableSuffix == "" {
+            return nil, fmt.Errorf("数据库对 %s 缺少 SRTableSuffix", pair.Name)
+        }
+    }
+
+    // 校验回滚策略取值
+    switch config.Rollback.Strategy {
+    case "stop_on_error", "continue_on_error":
+        // ok
+    default:
+        return nil, fmt.Errorf("rollback.strategy 取值非法: %s (允许: stop_on_error, continue_on_error)", config.Rollback.Strategy)
+    }
 
 	return &config, nil
 }

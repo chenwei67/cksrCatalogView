@@ -1,12 +1,12 @@
 package retry
 
 import (
-	"database/sql"
-	"fmt"
-	"time"
+    "database/sql"
+    "fmt"
+    "time"
 
-	"cksr/config"
-	"cksr/logger"
+    "cksr/config"
+    "cksr/logger"
 )
 
 // Config 重试配置
@@ -78,6 +78,29 @@ func QueryWithRetry(db *sql.DB, config Config, query string, args ...interface{}
 
 // QueryWithRetryDefault 使用配置文件中的重试配置进行多行查询
 func QueryWithRetryDefault(db *sql.DB, appConfig *config.Config, query string, args ...interface{}) (*sql.Rows, error) {
-	retryConfig := ConfigFromAppConfig(appConfig)
-	return QueryWithRetry(db, retryConfig, query, args...)
+    retryConfig := ConfigFromAppConfig(appConfig)
+    return QueryWithRetry(db, retryConfig, query, args...)
+}
+
+// ExecWithRetry 带重试的执行语句
+func ExecWithRetry(db *sql.DB, config Config, stmt string, args ...interface{}) error {
+    var err error
+    for i := 0; i <= config.MaxRetries; i++ {
+        if i > 0 {
+            logger.Warn("重试执行 (第%d次): %s", i, stmt)
+            time.Sleep(config.Delay)
+        }
+        _, err = db.Exec(stmt, args...)
+        if err == nil {
+            return nil
+        }
+        logger.Warn("执行失败 (第%d次): %v", i+1, err)
+    }
+    return fmt.Errorf("执行在%d次重试后仍然失败: %w", config.MaxRetries, err)
+}
+
+// ExecWithRetryDefault 使用配置文件中的重试配置进行执行
+func ExecWithRetryDefault(db *sql.DB, appConfig *config.Config, stmt string, args ...interface{}) error {
+    retryConfig := ConfigFromAppConfig(appConfig)
+    return ExecWithRetry(db, retryConfig, stmt, args...)
 }
