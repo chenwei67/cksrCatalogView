@@ -111,7 +111,7 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, cfg *confi
 		}
 
 		logger.Debug("正在解析ClickHouse表结构...")
-		ckTable, err := common.ParseTableFromString(ckSchemaMap[tableName], pair.ClickHouse.Database, tableName)
+        ckTable, err := common.ParseTableFromString(ckSchemaMap[tableName], pair.ClickHouse.Database, tableName, cfg)
 		if err != nil {
 			return fmt.Errorf("解析ClickHouse表%s失败: %w", tableName, err)
 		}
@@ -192,7 +192,7 @@ func processDatabasePair(dbPairManager *database.DatabasePairManager, cfg *confi
 		logger.Debug("重命名后StarRocks表DDL获取完成")
 
 		logger.Debug("正在解析重命名后的StarRocks表结构...")
-		srTableAfterRename, err := common.ParseTableFromString(srDDLAfterRename, pair.StarRocks.Database, renamedTableName)
+        srTableAfterRename, err := common.ParseTableFromString(srDDLAfterRename, pair.StarRocks.Database, renamedTableName, cfg)
 		if err != nil {
 			return fmt.Errorf("解析重命名后StarRocks表%s失败: %w", renamedTableName, err)
 		}

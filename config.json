@@ -10,14 +10,23 @@
         "http_port": 30076,
         "username": "default",
         "password": "",
-        "database": "business"
+        "database": "business",
+        "distributed_ddl_task_timeout_seconds": 3600,
+        "conn_timeout_seconds": 30,
+        "read_timeout_seconds": 60,
+        "write_timeout_seconds": 60,
+        "jdbc_socket_timeout_ms": 300000,
+        "jdbc_connection_timeout_ms": 30000
       },
       "starrocks": {
         "host": "10.107.29.99",
         "port": 32102,
         "username": "root",
         "password": "StarRocks!@2025#.",
-        "database": "business"
+        "database": "business",
+        "conn_timeout_seconds": 30,
+        "read_timeout_seconds": 60,
+        "write_timeout_seconds": 60
       }
     }
   ],
@@ -55,6 +64,9 @@
   },
   "view_updater": {
     "cron_expression": "*/10 * * * * *"
+  },
+  "parser": {
+    "ddl_parse_timeout_seconds": 60
   },
   "lock": {
     "debug_mode": true,

@@ -4,6 +4,7 @@ import (
     "fmt"
     "time"
 
+    "cksr/config"
     "cksr/logger"
     "cksr/parser"
 )
@@ -14,8 +15,8 @@ const (
     RoleRollback = "rollback"
 )
 
-// ParseTableFromString 从DDL字符串解析表结构，并设置正确的数据库名和表名
-func ParseTableFromString(ddl string, dbName string, tableName string) (parser.Table, error) {
+// ParseTableFromString 从DDL字符串解析表结构，并设置正确的数据库名和表名（带可配置超时）
+func ParseTableFromString(ddl string, dbName string, tableName string, cfg *config.Config) (parser.Table, error) {
     logger.Debug("完整DDL内容:\n%s", ddl)
     logger.Debug("DDL内容结束")
 
@@ -38,8 +39,8 @@ func ParseTableFromString(ddl string, dbName string, tableName string) (parser.T
         }
         logger.Debug("设置数据库名: %s, 表名: %s", dbName, tableName)
         return table, nil
-    case <-time.After(60 * time.Second):
-        logger.Warn("DDL解析超时 (60秒)")
+    case <-time.After(time.Duration(cfg.Parser.DDLParseTimeoutSeconds) * time.Second):
+        logger.Warn("DDL解析超时 (%d秒)", cfg.Parser.DDLParseTimeoutSeconds)
         return parser.Table{}, fmt.Errorf("DDL解析超时")
     }
 }

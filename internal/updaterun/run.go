@@ -257,7 +257,7 @@ func (vu *ViewUpdater) updateSingleView(srDB, chDB *sql.DB, dbManager *database.
     }
     
     // 解析ClickHouse表结构
-    ckTable, err := common.ParseTableFromString(ckDDL, pair.ClickHouse.Database, originalTableName)
+    ckTable, err := common.ParseTableFromString(ckDDL, pair.ClickHouse.Database, originalTableName, vu.config)
     if err != nil {
         return fmt.Errorf("解析ClickHouse表%s失败: %w", originalTableName, err)
     }
@@ -269,7 +269,7 @@ func (vu *ViewUpdater) updateSingleView(srDB, chDB *sql.DB, dbManager *database.
     }
     
     // 解析StarRocks表结构
-    srTable, err := common.ParseTableFromString(srDDL, pair.StarRocks.Database, srTableName)
+    srTable, err := common.ParseTableFromString(srDDL, pair.StarRocks.Database, srTableName, vu.config)
     if err != nil {
         return fmt.Errorf("解析StarRocks表%s失败: %w", srTableName, err)
     }
