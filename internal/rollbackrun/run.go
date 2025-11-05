@@ -1,19 +1,18 @@
 package rollbackrun
 
 import (
-	"context"
-	"database/sql"
-	"errors"
-	"fmt"
-	"strings"
-	"time"
+    "context"
+    "errors"
+    "fmt"
+    "strings"
+    "time"
 
-	"cksr/builder"
-	"cksr/config"
-	"cksr/database"
-	"cksr/internal/common"
-	"cksr/lock"
-	"cksr/logger"
+    "cksr/builder"
+    "cksr/config"
+    "cksr/database"
+    "cksr/internal/common"
+    "cksr/lock"
+    "cksr/logger"
 )
 
 // Run 统一入口：执行回滚逻辑（与 initrun 保持一致的接口风格）
@@ -39,6 +38,19 @@ const (
     StepDropCKCols   RollbackStep = "drop_ck_columns"
     StepUnknown      RollbackStep = "unknown"
 )
+
+// TableRollbackPlan 单表回滚计划（由发现阶段一次性生成，执行阶段直接使用）
+type TableRollbackPlan struct {
+    BaseTable      string   // 基础表名（不含后缀）
+    SuffixedTable  string   // 后缀表名（BaseTable + suffix）
+    NeedDropView   bool     // 是否需要删除基础名对应的视图
+    NeedRename     bool     // 是否需要将后缀表重命名为基础名
+    CanRename      bool     // 是否允许重命名（基础名不存在或为视图）
+    DropViewReason string   // 决策原因：为何需要/不需要删除视图
+    RenameReason   string   // 决策原因：为何需要/不需要重命名
+    RenameBlockReason string // 决策原因：为何重命名被阻止
+    CKAddedColumns []string // CK 中需要删除的新增列
+}
 
 // FailureRecord 失败记录（可用于库对内和全局）
 type FailureRecord struct {
@@ -73,31 +85,35 @@ func NewRollbackManager(cfg *config.Config, pairIndex int) *RollbackManager {
 // ExecuteRollback 执行完整的回退操作
 func (rm *RollbackManager) ExecuteRollback() error {
     logger.Info("开始执行回退操作（两阶段），数据库对: %s", rm.pair.Name)
-
-    commonTables, err := rm.findCommonTables()
+    plans, err := rm.findRollbackPlans()
     if err != nil {
-        return fmt.Errorf("确认共同表失败: %w", err)
+        return fmt.Errorf("确认共同表及回退计划失败: %w", err)
     }
-    logger.Info("确认到 %d 个共同表: %v", len(commonTables), commonTables)
+    // 打印基础表列表以便审计
+    baseTables := make([]string, 0, len(plans))
+    for _, p := range plans {
+        baseTables = append(baseTables, p.BaseTable)
+    }
+    logger.Info("确认到 %d 个共同表: %v", len(plans), baseTables)
 
-    rm.stats = RollbackStats{PairName: rm.pair.Name, TotalTables: len(commonTables)}
+    rm.stats = RollbackStats{PairName: rm.pair.Name, TotalTables: len(plans)}
 
-    // 针对每个共同表执行：先删视图，再改表名，最后删CK列
-    for idx, table := range commonTables {
-        logger.Info("[%d/%d] 回退表: %s", idx+1, len(commonTables), table)
-        if err := rm.executeRollbackForTable(table); err != nil {
+    // 针对每个共同表执行计划：先删视图，再改表名，最后删CK列
+    for idx, plan := range plans {
+        logger.Info("[%d/%d] 回退表: %s", idx+1, len(plans), plan.BaseTable)
+        if err := rm.executeRollbackPlan(plan); err != nil {
             // 现场打印失败信息
             var fr *FailureRecord
             if errors.As(err, &fr) {
                 rm.stats.Failed = append(rm.stats.Failed, FailureRecord{Table: fr.Table, Step: fr.Step, Err: fr.Err})
             } else {
-                rm.stats.Failed = append(rm.stats.Failed, FailureRecord{Table: table, Step: StepUnknown, Err: err})
+                rm.stats.Failed = append(rm.stats.Failed, FailureRecord{Table: plan.BaseTable, Step: StepUnknown, Err: err})
             }
             if rm.cfg.Rollback.Strategy == "continue_on_error" {
-                logger.Error("表 %s 回退失败(继续下一表): %v", table, err)
+                logger.Error("表 %s 回退失败(继续下一表): %v", plan.BaseTable, err)
                 continue
             }
-            return fmt.Errorf("表 %s 回退失败: %w", table, err)
+            return fmt.Errorf("表 %s 回退失败: %w", plan.BaseTable, err)
         }
         rm.stats.SuccessTables++
     }
@@ -106,9 +122,8 @@ func (rm *RollbackManager) ExecuteRollback() error {
     return nil
 }
 
-// dropCatalog 删除StarRocks中的Catalog
-// 两阶段第一步：确认共同表
-func (rm *RollbackManager) findCommonTables() ([]string, error) {
+// 两阶段第一步：确认共同表并生成回退计划
+func (rm *RollbackManager) findRollbackPlans() ([]TableRollbackPlan, error) {
     suffix := rm.pair.SRTableSuffix
 
     // 预取 SR 表列表与类型映射
@@ -141,7 +156,7 @@ func (rm *RollbackManager) findCommonTables() ([]string, error) {
         ignore[t] = true
     }
 
-    var commonTables []string
+    var plans []TableRollbackPlan
     for table := range ckSchemaMap {
         if ignore[table] {
             logger.Info("忽略表: %s (在配置的忽略列表中)", table)
@@ -152,110 +167,119 @@ func (rm *RollbackManager) findCommonTables() ([]string, error) {
         _, srSuffixedExists := srTableSet[suffixed]
         _, srBaseExists := srTableSet[table]
         srBaseType := srTypes[table]
-        srBaseIsView := srBaseType == "VIEW"
+        srBaseIsView := strings.ToUpper(srBaseType) == "VIEW"
+        suffixedType := srTypes[suffixed]
 
-        // CK是否有新增列
-        ckHasAdded := false
+        // CK新增列清单
+        var ckAddedCols []string
         if cols, ok := ckColsMap[table]; ok {
             for _, c := range cols {
                 if builder.IsAddedColumnByName(c) {
-                    ckHasAdded = true
-                    break
+                    ckAddedCols = append(ckAddedCols, c)
                 }
             }
         }
 
-        // 正常完成态或部分态都认定为共同表
+        // 认定为共同表的条件与原逻辑一致
+        isCommon := false
         if srSuffixedExists && srBaseExists && srBaseIsView {
-            commonTables = append(commonTables, table)
+            isCommon = true
+        } else if srSuffixedExists && !srBaseIsView {
+            isCommon = true
+        } else if !srSuffixedExists && srBaseExists && !srBaseIsView && len(ckAddedCols) > 0 {
+            isCommon = true
+        }
+        if !isCommon {
             continue
         }
 
-        // 情形1：SR已重命名但未创建视图
-        if srSuffixedExists && !srBaseIsView {
-            commonTables = append(commonTables, table)
-            continue
+        // 计划字段
+        plan := TableRollbackPlan{
+            BaseTable:      table,
+            SuffixedTable:  suffixed,
+            NeedDropView:   srBaseExists && srBaseIsView,
+            NeedRename:     srSuffixedExists && strings.ToUpper(suffixedType) == "BASE TABLE",
+            CanRename:      (!srBaseExists) || srBaseIsView,
+            CKAddedColumns: ckAddedCols,
         }
 
-        // 情形2：SR未重命名但CK已添加列
-        if !srSuffixedExists && srBaseExists && !srBaseIsView && ckHasAdded {
-            commonTables = append(commonTables, table)
-            continue
+        // 决策原因填充
+        if plan.NeedDropView {
+            plan.DropViewReason = fmt.Sprintf("基础表存在且为VIEW(避免与重命名目标 %s 冲突)", table)
+        } else if srBaseExists && !srBaseIsView {
+            plan.DropViewReason = fmt.Sprintf("基础表存在且为非视图(类型=%s)，无需删除视图", srBaseType)
+        } else if !srBaseExists {
+            plan.DropViewReason = "基础表不存在，无需删除视图"
         }
-        // 情形3/4：不加入共同表
+
+        if plan.NeedRename {
+            plan.RenameReason = "后缀表存在且类型为BASE TABLE，需要去后缀重命名"
+        } else if srSuffixedExists {
+            plan.RenameReason = fmt.Sprintf("后缀表存在但类型为%s，不需要重命名", strings.ToUpper(suffixedType))
+        } else {
+            plan.RenameReason = "后缀表不存在，不需要重命名"
+        }
+
+        if plan.NeedRename && !plan.CanRename {
+            // 基础名存在且不是视图时阻止重命名
+            baseType := strings.ToUpper(srBaseType)
+            plan.RenameBlockReason = fmt.Sprintf("基础表 %s.%s 已存在且为%s，禁止从 %s 重命名", rm.pair.StarRocks.Database, table, baseType, suffixed)
+        }
+
+        plans = append(plans, plan)
     }
 
-    return commonTables, nil
+    return plans, nil
 }
 
-// dropAllViews 删除StarRocks中的所有视图
-// 针对单表执行回退序列：删视图 -> 去后缀 -> 删CK列
-func (rm *RollbackManager) executeRollbackForTable(baseTable string) error {
+// 针对单表执行回退计划：删视图 -> 去后缀 -> 删CK列
+func (rm *RollbackManager) executeRollbackPlan(plan TableRollbackPlan) error {
     srDB := rm.pair.StarRocks.Database
     ckDB := rm.pair.ClickHouse.Database
     suffix := rm.pair.SRTableSuffix
 
-    // 0. 预检：使用一次性类型查询同时判断存在性与类型
-    renameNeeded := false
-    suffixed := baseTable + suffix
-    suffixedType, err := rm.dbManager.GetStarRocksTableType(suffixed)
-    if err != nil && !errors.Is(err, sql.ErrNoRows){
-        // 查询失败
-        return &FailureRecord{Table: baseTable, Step: StepPrecheck, Err: fmt.Errorf("查询SR表类型失败(%s): %w", suffixed, err)}
-    } else if errors.Is(err, sql.ErrNoRows){
-		// 不存在，那么不用rename
-	}
-
-    if strings.ToUpper(suffixedType) == "BASE TABLE" {
-        renameNeeded = true
-        baseType, err := rm.dbManager.GetStarRocksTableType(baseTable)
-        if err != nil  && !errors.Is(err, sql.ErrNoRows){
-            return &FailureRecord{Table: baseTable, Step: StepPrecheck, Err: fmt.Errorf("查询SR表类型失败(%s): %w", baseTable, err)}
-        } else if  errors.Is(err, sql.ErrNoRows){
-			// 不存在，不需要删除view
-		} else{
-			baseIsView := strings.ToUpper(baseType) == "VIEW"
-			if !baseIsView {
-				return &FailureRecord{Table: baseTable, Step: StepPrecheck, Err: fmt.Errorf("重命名冲突：目标表 %s.%s 已存在且不是视图，停止回滚此表", srDB, baseTable)}
-			}
-		}
+    // 0. 预检：若需要重命名但不允许重命名（基础名存在且不是视图），则直接失败并不做任何破坏性操作
+    if plan.NeedRename && !plan.CanRename {
+        reason := plan.RenameBlockReason
+        if reason == "" {
+            reason = fmt.Sprintf("重命名冲突：目标表 %s.%s 已存在且不是视图", srDB, plan.BaseTable)
+        }
+        return &FailureRecord{Table: plan.BaseTable, Step: StepPrecheck, Err: fmt.Errorf("%s", reason)}
     }
 
-    // 1. 删除VIEW（无需查询，直接使用 IF EXISTS 防御性执行）
-    dropViewSQL := builder.NewRollbackBuilder(srDB, baseTable).BuildDropViewSQL()
-    if err := rm.dbManager.ExecuteRollbackSQL([]string{dropViewSQL}, false); err != nil {
-        return &FailureRecord{Table: baseTable, Step: StepDropView, Err: fmt.Errorf("删除视图 %s 失败: %w", baseTable, err)}
+    // 1. 删除VIEW（仅当计划指示需要删除视图时执行）
+    if plan.NeedDropView {
+        dropViewSQL := builder.NewRollbackBuilder(srDB, plan.BaseTable).BuildDropViewSQL()
+        if err := rm.dbManager.ExecuteRollbackSQL([]string{dropViewSQL}, false); err != nil {
+            return &FailureRecord{Table: plan.BaseTable, Step: StepDropView, Err: fmt.Errorf("删除视图 %s 失败(原因: %s): %w", plan.BaseTable, plan.DropViewReason, err)}
+        }
+        logger.Info("已删除视图(若存在): %s.%s，原因: %s", srDB, plan.BaseTable, plan.DropViewReason)
+    } else {
+        logger.Info("跳过删除视图: %s.%s，原因: %s", srDB, plan.BaseTable, plan.DropViewReason)
     }
-    logger.Info("尝试删除视图(若存在): %s.%s", srDB, baseTable)
 
-    // 2. 去除SR表后缀（仅在预检判定需要重命名时执行；此时视图已删除，避免冲突）
-    if renameNeeded {
-        renameSQL := builder.NewRollbackBuilder(srDB, suffixed).BuildRenameSRTableSQL(suffix)
+    // 2. 去除SR表后缀（仅在需要且允许时执行；此时视图已删除，避免冲突）
+    if plan.NeedRename {
+        renameSQL := builder.NewRollbackBuilder(srDB, plan.SuffixedTable).BuildRenameSRTableSQL(suffix)
         if renameSQL != "" {
             if err := rm.dbManager.ExecuteRollbackSQL([]string{renameSQL}, false); err != nil {
-                return &FailureRecord{Table: baseTable, Step: StepRenameSuffix, Err: fmt.Errorf("去除后缀重命名 %s -> %s 失败: %w", suffixed, baseTable, err)}
+                return &FailureRecord{Table: plan.BaseTable, Step: StepRenameSuffix, Err: fmt.Errorf("去除后缀重命名 %s -> %s 失败(原因: %s): %w", plan.SuffixedTable, plan.BaseTable, plan.RenameReason, err)}
             }
-            logger.Info("已去除后缀并重命名: %s.%s -> %s", srDB, suffixed, baseTable)
+            logger.Info("已去除后缀并重命名: %s.%s -> %s，原因: %s", srDB, plan.SuffixedTable, plan.BaseTable, plan.RenameReason)
         }
     }
 
-    // 3. 删除CK表中通过 add column 新增的列
-    ckCols, err := rm.dbManager.GetClickHouseTableColumns(baseTable)
-    if err != nil {
-        return &FailureRecord{Table: baseTable, Step: StepDropCKCols, Err: fmt.Errorf("获取CK表 %s 列信息失败: %w", baseTable, err)}
-    }
-    var dropCKSQLs []string
-    rb := builder.NewRollbackBuilder(ckDB, baseTable)
-    for _, c := range ckCols {
-        if builder.IsAddedColumnByName(c) {
+    // 3. 删除CK表中通过 add column 新增的列（使用计划中预先识别出的列名）
+    if len(plan.CKAddedColumns) > 0 {
+        var dropCKSQLs []string
+        rb := builder.NewRollbackBuilder(ckDB, plan.BaseTable)
+        for _, c := range plan.CKAddedColumns {
             dropCKSQLs = append(dropCKSQLs, rb.BuildDropCKColumnSQL(c))
         }
-    }
-    if len(dropCKSQLs) > 0 {
         if err := rm.dbManager.ExecuteRollbackSQL(dropCKSQLs, true); err != nil {
-            return &FailureRecord{Table: baseTable, Step: StepDropCKCols, Err: fmt.Errorf("删除CK列失败(表 %s): %w", baseTable, err)}
+            return &FailureRecord{Table: plan.BaseTable, Step: StepDropCKCols, Err: fmt.Errorf("删除CK列失败(表 %s): %w", plan.BaseTable, err)}
         }
-        logger.Info("已删除CK表 %s 的 %d 个新增列", baseTable, len(dropCKSQLs))
+        logger.Info("已删除CK表 %s 的 %d 个新增列", plan.BaseTable, len(dropCKSQLs))
     }
 
     return nil
@@ -321,8 +345,6 @@ func ExecuteRollbackForAllPairs(cfg *config.Config) error {
         logger.Info("数据库对 %s 回退完成", pair.Name)
 		rollbackManager.printPairSummary()
     }
-
-
 
     // 全局统计打印
     logger.Info("回退统计 - 全局")

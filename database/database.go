@@ -96,18 +96,18 @@ func (dm *DatabasePairManager) GetStarRocksConnection() (*sql.DB, error) {
 
 // ExportClickHouseTables 导出ClickHouse表结构
 func (dm *DatabasePairManager) ExportClickHouseTables() (map[string]string, error) {
-	db, err := dm.GetClickHouseConnection()
-	if err != nil {
-		return nil, err
-	}
-	defer db.Close()
+    db, err := dm.GetClickHouseConnection()
+    if err != nil {
+        return nil, err
+    }
+    defer db.Close()
 
-	// 使用重试机制获取表列表
-	rows, err := db.Query("SHOW TABLES")
-	if err != nil {
-		return nil, fmt.Errorf("获取表列表失败: %w", err)
-	}
-	defer rows.Close()
+    // 使用重试机制获取表列表
+    rows, err := retry.QueryWithRetryDefault(db, dm.config, "SHOW TABLES")
+    if err != nil {
+        return nil, fmt.Errorf("获取表列表失败: %w", err)
+    }
+    defer rows.Close()
 
 	result := make(map[string]string)
 	for rows.Next() {
