@@ -8,6 +8,7 @@
 7. 优化initrun中的逻辑，现在太杂乱了
 8. ck和sr的连接要池化
 9. 要对日志做模式管理，区分不同模式的日志，如init、rollback、update等
+10. update中生成alter view粗暴使用了字符串替换，要改
 
 # 要求
 1. 不要考虑 backward compatibility

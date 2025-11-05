@@ -14,7 +14,6 @@ import (
     "fmt"
     "os"
     "os/signal"
-    "strings"
     "sync"
     "syscall"
     "time"
@@ -296,14 +295,11 @@ func (vu *ViewUpdater) updateSingleView(srDB, chDB *sql.DB, dbManager *database.
         viewName, // 传入视图名
     )
     
-    // 使用ViewBuilder的Build方法来处理字段映射和生成CREATE VIEW SQL
-    createViewSQL, err := viewBuilder.Build()
+    // 直接生成ALTER VIEW SQL，避免粗暴字符串替换
+    alterViewSQL, err := viewBuilder.BuildAlter()
     if err != nil {
-        return fmt.Errorf("构建视图SQL失败: %w", err)
+        return fmt.Errorf("构建ALTER VIEW SQL失败: %w", err)
     }
-    
-    // 将CREATE VIEW转换为ALTER VIEW
-    alterViewSQL := strings.Replace(createViewSQL, "create view if not exists", "alter view", 1)
     
     // 执行ALTER VIEW语句
     if err := vu.executeSQL(srDB, alterViewSQL); err != nil {

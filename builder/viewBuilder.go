@@ -1,15 +1,21 @@
 package builder
 
 import (
-	"database/sql"
-	"fmt"
-	"maps"
-	"strings"
+    "database/sql"
+    "fmt"
+    "maps"
+    "strings"
 
 	"cksr/config"
 	"cksr/logger"
 	"cksr/parser"
 	"cksr/retry"
+)
+
+// 视图SQL类型常量，避免使用魔字符串
+const (
+    SQLTypeCreate = "CREATE"
+    SQLTypeAlter  = "ALTER"
 )
 
 // DatabaseManager 定义数据库管理器接口（简化版，只需要获取连接）
@@ -183,11 +189,16 @@ func NewBuilder(
 // 遍历ck的fields，根据type，决定要不要，如果不要，继续下一个，如果要，如下
 // 获取重定向字段，构造出clause，写入tablebuilder；找到sr中对应的字段，同样构造出clause，写入tablebuilder
 func (v *ViewBuilder) Build() (string, error) {
-	logger.Debug("开始构建视图 %s.%s", v.dbName, v.viewName)
-	logger.Debug("ClickHouse表: %s.%s (catalog: %s)", v.ck.DBName, v.ck.Name, v.ck.catalogName)
-	logger.Debug("StarRocks表: %s.%s", v.sr.DBName, v.sr.Name)
-	logger.Debug("ClickHouse字段转换器数量: %d", len(v.ck.converters))
-	logger.Debug("StarRocks字段映射数量: %d", len(v.sr.nameMap))
+    return v.BuildWithType(SQLTypeCreate)
+}
+
+// BuildWithType 生成视图SQL，支持 CREATE 或 ALTER
+func (v *ViewBuilder) BuildWithType(sqlType string) (string, error) {
+    logger.Debug("开始构建视图 %s.%s", v.dbName, v.viewName)
+    logger.Debug("ClickHouse表: %s.%s (catalog: %s)", v.ck.DBName, v.ck.Name, v.ck.catalogName)
+    logger.Debug("StarRocks表: %s.%s", v.sr.DBName, v.sr.Name)
+    logger.Debug("ClickHouse字段转换器数量: %d", len(v.ck.converters))
+    logger.Debug("StarRocks字段映射数量: %d", len(v.sr.nameMap))
 
 	processedFields := 0
 	skippedFields := 0
@@ -231,10 +242,10 @@ func (v *ViewBuilder) Build() (string, error) {
 	logger.Debug("字段处理完成 - 总数: %d, 处理: %d, 跳过: %d", len(v.ck.converters), processedFields, skippedFields)
 	logger.Debug("最终映射的字段数量 - ClickHouse: %d, StarRocks: %d", len(v.ck.fields), len(v.sr.fields))
 
-	if len(v.ck.fields) == 0 {
-		logger.Error("ClickHouse字段为空，无法创建视图")
-		return "", fmt.Errorf("ck field is empty")
-	}
+    if len(v.ck.fields) == 0 {
+        logger.Error("ClickHouse字段为空，无法创建视图")
+        return "", fmt.Errorf("ck field is empty")
+    }
 
 	// 添加详细的字段映射验证日志
 	logger.Debug("开始字段映射验证 - StarRocks字段总数: %d, 已映射字段数: %d", len(v.sr.nameMap), len(v.sr.fields))
@@ -303,26 +314,24 @@ func (v *ViewBuilder) Build() (string, error) {
 
 	logger.Debug("字段映射验证通过，开始生成SQL")
 
-	ckQ := v.ck.GenQuerySQL()
-	srQ := v.sr.GenQuerySQL()
-	logger.Debug("生成的ClickHouse查询SQL:\n%s", ckQ)
-	logger.Debug("生成的StarRocks查询SQL:\n%s", srQ)
+    ckQ := v.ck.GenQuerySQL()
+    srQ := v.sr.GenQuerySQL()
+    logger.Debug("生成的ClickHouse查询SQL:\n%s", ckQ)
+    logger.Debug("生成的StarRocks查询SQL:\n%s", srQ)
 
-	viewSQL, err := v.GenViewSQL(ckQ, srQ)
-	if err != nil {
-		return "", fmt.Errorf("生成视图SQL失败: %w", err)
-	}
-	logger.Debug("生成的CREATE VIEW SQL:\n%s", viewSQL)
+    viewSQL, err := v.GenViewSQLWithType(ckQ, srQ, sqlType)
+    if err != nil {
+        return "", fmt.Errorf("生成视图SQL失败: %w", err)
+    }
+    logger.Debug("生成的VIEW SQL:\n%s", viewSQL)
 
-	return viewSQL, nil
+    return viewSQL, nil
 }
 
-func (v *ViewBuilder) GenViewSQL(ckQ, srQ string) (string, error) {
-	return v.GenViewSQLWithType(ckQ, srQ, "CREATE")
-}
 
-func (v *ViewBuilder) GenAlterViewSQL(ckQ, srQ string) (string, error) {
-	return v.GenViewSQLWithType(ckQ, srQ, "ALTER")
+// BuildAlter 生成 ALTER VIEW SQL（便捷方法）
+func (v *ViewBuilder) BuildAlter() (string, error) {
+    return v.BuildWithType(SQLTypeAlter)
 }
 
 // getTimestampColumnName 根据配置获取指定表的时间戳列名，如果没有配置则返回默认的recordTimestamp
@@ -499,11 +508,11 @@ func (v *ViewBuilder) GenViewSQLWithType(ckQ, srQ string, sqlType string) (strin
 	// 生成视图SQL，ClickHouse使用 < 条件，StarRocks使用 >= 条件
 	sql = fmt.Sprintf("%s.%s as \n%s \nwhere %s < %s \nunion all \n%s \nwhere %s >= %s; \n",
 		v.dbName, v.viewName, ckQ, timestampColumn, minTimestamp, srQ, timestampColumn, minTimestamp)
-	if sqlType == "ALTER" {
-		sql = "alter view " + sql
-	} else {
-		sql = "create view if not exists " + sql
-	}
+    if sqlType == SQLTypeAlter {
+        sql = "alter view " + sql
+    } else {
+        sql = "create view if not exists " + sql
+    }
 
 	logger.Debug("最终视图SQL:\n%s", sql)
 	return sql, nil
