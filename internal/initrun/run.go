@@ -215,8 +215,7 @@ func (im *InitManager) processTable(plan TableInitPlan, ckSchemaMap map[string]s
             }
             actualSRTable = newName
         } else {
-            logger.Warn("跳过重命名：%s 非原生表，不支持 RENAME", plan.BaseTable)
-            actualSRTable = plan.SuffixedTable // 兜底为后缀名，后续DDL获取失败会如实上抛
+                return fmt.Errorf("StarRocks %s 需要重命名，却不是原生表", actualSRTable)
         }
     }
 
