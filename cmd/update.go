@@ -12,6 +12,8 @@ func NewUpdateCmd() *cobra.Command {
         Use:   "update",
         Short: "仅启动常驻视图更新器",
         RunE: func(cmd *cobra.Command, args []string) error {
+            // 设置日志模式为 UPDATE
+            logger.SetLogMode(logger.ModeUpdate)
             cfg, err := loadConfigAndInitLogging(cmd)
             if err != nil {
                 return err

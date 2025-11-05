@@ -12,6 +12,8 @@ func NewRollbackCmd() *cobra.Command {
         Use:   "rollback",
         Short: "回滚删除视图及相关变更",
         RunE: func(cmd *cobra.Command, args []string) error {
+            // 设置日志模式为 ROLLBACK
+            logger.SetLogMode(logger.ModeRollback)
             cfg, err := loadConfigAndInitLogging(cmd)
             if err != nil {
                 return err

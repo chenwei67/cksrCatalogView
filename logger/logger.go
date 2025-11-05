@@ -1,12 +1,12 @@
 package logger
 
 import (
-	"fmt"
-	"io"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
+    "fmt"
+    "io"
+    "os"
+    "path/filepath"
+    "strings"
+    "time"
 )
 
 // LogLevel 定义日志级别
@@ -35,16 +35,43 @@ var errorOutput io.Writer = os.Stderr
 // 日志文件句柄
 var logFile *os.File
 
+// LogMode 定义日志模式（用于区分 init / rollback / update 等场景）
+type LogMode string
+
+const (
+    ModeGeneral  LogMode = "GENERAL"
+    ModeInit     LogMode = "INIT"
+    ModeRollback LogMode = "ROLLBACK"
+    ModeUpdate   LogMode = "UPDATE"
+)
+
+// 当前日志模式
+var currentLogMode LogMode = ModeGeneral
+
 // SetLogLevel 设置日志级别
 func SetLogLevel(level LogLevel) {
-	currentLogLevel = level
+    currentLogLevel = level
+}
+
+// SetLogMode 设置当前日志模式
+func SetLogMode(mode LogMode) {
+    if mode == "" {
+        currentLogMode = ModeGeneral
+        return
+    }
+    currentLogMode = mode
+}
+
+// GetCurrentMode 获取当前日志模式
+func GetCurrentMode() LogMode {
+    return currentLogMode
 }
 
 // InitFileLogging 初始化文件日志
 func InitFileLogging(enableFileLog bool, logFilePath string, tempDir string) error {
-	if !enableFileLog {
-		// 如果不启用文件日志，使用默认的标准输出
-		logOutput = os.Stdout
+    if !enableFileLog {
+        // 如果不启用文件日志，使用默认的标准输出
+        logOutput = os.Stdout
 		errorOutput = os.Stderr
 		return nil
 	}
@@ -89,10 +116,10 @@ func InitFileLogging(enableFileLog bool, logFilePath string, tempDir string) err
 
 // CloseLogFile 关闭日志文件
 func CloseLogFile() {
-	if logFile != nil {
-		logFile.Close()
-		logFile = nil
-	}
+    if logFile != nil {
+        logFile.Close()
+        logFile = nil
+    }
 }
 
 // ParseLogLevel 从字符串解析日志级别
@@ -115,51 +142,56 @@ func ParseLogLevel(levelStr string) LogLevel {
 
 // LogLevelString 返回日志级别的字符串表示
 func LogLevelString(level LogLevel) string {
-	switch level {
-	case SILENT:
-		return "SILENT"
-	case ERROR:
-		return "ERROR"
-	case WARN:
-		return "WARN"
-	case INFO:
-		return "INFO"
-	case DEBUG:
-		return "DEBUG"
-	default:
-		return "INFO"
-	}
+    switch level {
+    case SILENT:
+        return "SILENT"
+    case ERROR:
+        return "ERROR"
+    case WARN:
+        return "WARN"
+    case INFO:
+        return "INFO"
+    case DEBUG:
+        return "DEBUG"
+    default:
+        return "INFO"
+    }
+}
+
+// modePrefix 返回模式前缀字符串
+func modePrefix() string {
+    return "[" + string(currentLogMode) + "] "
 }
 
 // Error 输出错误日志
 func Error(format string, args ...interface{}) {
-	if currentLogLevel >= ERROR {
-		fmt.Fprintf(errorOutput, "ERROR: "+format+"\n", args...)
-	}
+    if currentLogLevel >= ERROR {
+        fmt.Fprintf(errorOutput, "ERROR "+modePrefix()+format+"\n", args...)
+    }
 }
 
 // Warn 输出警告日志
 func Warn(format string, args ...interface{}) {
-	if currentLogLevel >= WARN {
-		fmt.Fprintf(logOutput, "警告: "+format+"\n", args...)
-	}
+    if currentLogLevel >= WARN {
+        fmt.Fprintf(logOutput, "Warn "+modePrefix()+format+"\n", args...)
+    }
 }
 
 // Info 输出信息日志
 func Info(format string, args ...interface{}) {
-	if currentLogLevel >= INFO {
-		fmt.Fprintf(logOutput, format+"\n", args...)
-	}
+    if currentLogLevel >= INFO {
+        fmt.Fprintf(logOutput, "Info "+modePrefix()+format+"\n", args...)
+    }
 }
 
 // Debug 输出调试日志
 func Debug(format string, args ...interface{}) {
-	if currentLogLevel >= DEBUG {
-		fmt.Fprintf(logOutput, "DEBUG: "+format+"\n", args...)
-	}
+    if currentLogLevel >= DEBUG {
+        fmt.Fprintf(logOutput, "DEBUG "+modePrefix()+format+"\n", args...)
+    }
 }
 
 // GetCurrentLevel 获取当前日志级别
 func GetCurrentLevel() LogLevel {
-	return currentLogLevel
+    return currentLogLevel
 }

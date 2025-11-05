@@ -12,6 +12,8 @@ func NewInitCmd() *cobra.Command {
         Use:   "init",
         Short: "初始化并创建视图",
         RunE: func(cmd *cobra.Command, args []string) error {
+            // 设置日志模式为 INIT，确保后续日志带模式前缀
+            logger.SetLogMode(logger.ModeInit)
             cfg, err := loadConfigAndInitLogging(cmd)
             if err != nil {
                 return err
