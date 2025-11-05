@@ -6,6 +6,8 @@
 5. 将ck和sr的如连接超时时间等连接参数配置化，并全面做好配置的严格校验
 6. 对ddl解析的超时时间也配置化
 7. 优化initrun中的逻辑，现在太杂乱了
+8. ck和sr的连接要池化
+9. 要对日志做模式管理，区分不同模式的日志，如init、rollback、update等
 
 # 要求
 1. 不要考虑 backward compatibility

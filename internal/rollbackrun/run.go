@@ -167,7 +167,7 @@ func (rm *RollbackManager) findRollbackPlans() ([]TableRollbackPlan, error) {
         _, srSuffixedExists := srTableSet[suffixed]
         _, srBaseExists := srTableSet[table]
         srBaseType := srTypes[table]
-        srBaseIsView := strings.ToUpper(srBaseType) == "VIEW"
+        srBaseIsView := strings.ToUpper(srBaseType) == database.StarRocksTableTypeView
         suffixedType := srTypes[suffixed]
 
         // CK新增列清单
@@ -198,14 +198,14 @@ func (rm *RollbackManager) findRollbackPlans() ([]TableRollbackPlan, error) {
             BaseTable:      table,
             SuffixedTable:  suffixed,
             NeedDropView:   srBaseExists && srBaseIsView,
-            NeedRename:     srSuffixedExists && strings.ToUpper(suffixedType) == "BASE TABLE",
+            NeedRename:     srSuffixedExists && strings.ToUpper(suffixedType) == database.StarRocksTableTypeBaseTable,
             CanRename:      (!srBaseExists) || srBaseIsView,
             CKAddedColumns: ckAddedCols,
         }
 
         // 决策原因填充
         if plan.NeedDropView {
-            plan.DropViewReason = fmt.Sprintf("基础表存在且为VIEW(避免与重命名目标 %s 冲突)", table)
+            plan.DropViewReason = fmt.Sprintf("基础表存在且为%s(避免与重命名目标 %s 冲突)", database.StarRocksTableTypeView, table)
         } else if srBaseExists && !srBaseIsView {
             plan.DropViewReason = fmt.Sprintf("基础表存在且为非视图(类型=%s)，无需删除视图", srBaseType)
         } else if !srBaseExists {
@@ -213,7 +213,7 @@ func (rm *RollbackManager) findRollbackPlans() ([]TableRollbackPlan, error) {
         }
 
         if plan.NeedRename {
-            plan.RenameReason = "后缀表存在且类型为BASE TABLE，需要去后缀重命名"
+            plan.RenameReason = fmt.Sprintf("后缀表存在且类型为%s，需要去后缀重命名", database.StarRocksTableTypeBaseTable)
         } else if srSuffixedExists {
             plan.RenameReason = fmt.Sprintf("后缀表存在但类型为%s，不需要重命名", strings.ToUpper(suffixedType))
         } else {

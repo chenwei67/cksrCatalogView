@@ -23,8 +23,11 @@ import (
 
 // ClickHouse 设置项常量，避免使用魔字符串
 const (
-	// 分布式 DDL 任务超时设置键名
-	ClickHouseSettingDistributedDDLTaskTimeout = "distributed_ddl_task_timeout"
+    // 分布式 DDL 任务超时设置键名
+    ClickHouseSettingDistributedDDLTaskTimeout = "distributed_ddl_task_timeout"
+    // StarRocks 表类型常量
+    StarRocksTableTypeBaseTable               = "BASE TABLE"
+    StarRocksTableTypeView                    = "VIEW"
 )
 
 // DatabasePairManager 数据库对管理器
@@ -378,8 +381,8 @@ func (dm *DatabasePairManager) CheckStarRocksTableIsNative(tableName string) (bo
 	// StarRocks中native表的table_type为'BASE TABLE'
 	// 非native表（如外部表、物化视图等）会有不同的table_type
 	// VIEW类型的表也不是native表
-	tableTypeUpper := strings.ToUpper(tableType)
-	return tableTypeUpper == "BASE TABLE", nil
+    tableTypeUpper := strings.ToUpper(tableType)
+    return tableTypeUpper == StarRocksTableTypeBaseTable, nil
 }
 
 // CheckStarRocksTableIsView 检查StarRocks表是否为VIEW
@@ -411,8 +414,8 @@ func (dm *DatabasePairManager) CheckStarRocksTableIsView(tableName string) (bool
 			pair.StarRocks.Database, tableName, err)
 	}
 
-	// 检查是否为VIEW
-	return strings.ToUpper(tableType) == "VIEW", nil
+    // 检查是否为VIEW
+    return strings.ToUpper(tableType) == StarRocksTableTypeView, nil
 }
 
 // GetStarRocksTableType 获取StarRocks表类型（如 BASE TABLE / VIEW）。
