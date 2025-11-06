@@ -199,120 +199,10 @@ func (v *ViewBuilder) BuildWithType(sqlType string) (string, error) {
     logger.Debug("StarRocks表: %s.%s", v.sr.DBName, v.sr.Name)
     logger.Debug("ClickHouse字段转换器数量: %d", len(v.ck.converters))
     logger.Debug("StarRocks字段映射数量: %d", len(v.sr.nameMap))
-
-	processedFields := 0
-	skippedFields := 0
-
-	for i, fieldConverter := range v.ck.converters {
-		if i > 0 && i%100 == 0 {
-			logger.Debug("ViewBuilder字段处理进度: %d/%d", i, len(v.ck.converters))
-		}
-
-		logger.Debug("处理ClickHouse字段 #%d: %s (类型: %s)", i+1, fieldConverter.originName(), fieldConverter.originType())
-
-		ckField := NewCKField(fieldConverter)
-		// if ckField.Ignore() {
-		// 	continue
-		// }
-
-		logger.Debug("开始映射StarRocks字段...")
-		srField, err := v.MapSRField(fieldConverter, v.sr.nameMap)
-		if err != nil {
-			// 如果ClickHouse字段在StarRocks中不存在，跳过该字段而不是报错
-			logger.Warn("ClickHouse字段 '%s' 在StarRocks中不存在，跳过该字段", fieldConverter.originName())
-			skippedFields++
-			continue
-		}
-		logger.Debug("成功映射到StarRocks字段: %s", srField.Name)
-
-		logger.Debug("生成StarRocks字段子句...")
-		srField.GenClause()
-		v.sr.addClauseField(srField)
-
-		logger.Debug("设置ClickHouse字段的StarRocks映射...")
-		ckField.SetSRField(srField)
-		logger.Debug("生成ClickHouse字段子句...")
-		ckField.GenClause()
-		v.ck.addClauseField(ckField)
-
-		processedFields++
-		logger.Debug("字段 %s 处理完成", fieldConverter.originName())
-	}
-
-	logger.Debug("字段处理完成 - 总数: %d, 处理: %d, 跳过: %d", len(v.ck.converters), processedFields, skippedFields)
-	logger.Debug("最终映射的字段数量 - ClickHouse: %d, StarRocks: %d", len(v.ck.fields), len(v.sr.fields))
-
-    if len(v.ck.fields) == 0 {
-        logger.Error("ClickHouse字段为空，无法创建视图")
-        return "", fmt.Errorf("ck field is empty")
+    // 统一执行映射与严格校验
+    if err := v.PrepareAndValidate(); err != nil {
+        return "", err
     }
-
-	// 添加详细的字段映射验证日志
-	logger.Debug("开始字段映射验证 - StarRocks字段总数: %d, 已映射字段数: %d", len(v.sr.nameMap), len(v.sr.fields))
-
-	// 添加字段名称统计
-	fieldNames := make(map[string]int)
-	for _, field := range v.sr.fields {
-		fieldNames[field.Name]++
-	}
-
-	duplicateFieldNames := make([]string, 0)
-	for name, count := range fieldNames {
-		if count > 1 {
-			duplicateFieldNames = append(duplicateFieldNames, fmt.Sprintf("%s(x%d)", name, count))
-		}
-	}
-
-	if len(duplicateFieldNames) > 0 {
-		logger.Error("发现重复的字段名: %v", duplicateFieldNames)
-	}
-
-	logger.Debug("字段名称统计完成 - 唯一字段名: %d, 重复字段名: %d", len(fieldNames), len(duplicateFieldNames))
-
-	if len(v.sr.fields) != len(v.sr.nameMap) {
-		var err error
-		var fs []SRField
-		nameMapCopy := make(map[string]SRField)
-		maps.Copy(nameMapCopy, v.sr.nameMap)
-
-		logger.Debug("检查字段映射一致性...")
-		for i, f := range v.sr.fields {
-			logger.Debug("检查字段 #%d: %s", i+1, f.Name)
-			if _, ok := v.sr.nameMap[f.Name]; !ok {
-				logger.Warn("字段 %s 在nameMap中不存在", f.Name)
-				fs = append(fs, f)
-			} else {
-				delete(nameMapCopy, f.Name)
-			}
-		}
-
-		if len(fs) != 0 {
-			logger.Error("发现不存在于DDL中的字段: %+v", fs)
-			err = fmt.Errorf("build select column in view error, some fields not exists in create sql ddl: %+v", fs)
-		}
-		if len(nameMapCopy) != 0 {
-			var lackfs []SRField
-			for _, f := range nameMapCopy {
-				lackfs = append(lackfs, f)
-			}
-			logger.Error("发现存在于DDL但未映射的字段: %+v", lackfs)
-			if err != nil {
-				err = fmt.Errorf("%w, and some fields exists in create sql ddl but not in view select: %+v", err, lackfs)
-			} else {
-				err = fmt.Errorf("build select column in view error, some fields exists in create sql ddl but not in view select: %+v", lackfs)
-			}
-		}
-
-		// 如果err仍然为nil，说明字段数量不匹配但没有具体的错误字段，这是一个异常情况
-		if err == nil {
-			err = fmt.Errorf("字段映射数量不匹配: sr.fields数量=%d, sr.nameMap数量=%d, 但未发现具体的不匹配字段", len(v.sr.fields), len(v.sr.nameMap))
-		}
-
-		logger.Error("字段映射验证失败: %v", err)
-		return "", err
-	}
-
-	logger.Debug("字段映射验证通过，开始生成SQL")
 
     ckQ := v.ck.GenQuerySQL()
     srQ := v.sr.GenQuerySQL()
@@ -328,10 +218,161 @@ func (v *ViewBuilder) BuildWithType(sqlType string) (string, error) {
     return viewSQL, nil
 }
 
+// PrepareAndValidate 执行字段映射并进行严格校验（可被多处复用）
+func (v *ViewBuilder) PrepareAndValidate() error {
+    // 重置已生成的字段，避免重复构建
+    v.ck.fields = nil
+    v.sr.fields = nil
+
+    processedFields := 0
+    skippedFields := 0
+
+    for i, fieldConverter := range v.ck.converters {
+        if i > 0 && i%100 == 0 {
+            logger.Debug("ViewBuilder字段处理进度: %d/%d", i, len(v.ck.converters))
+        }
+
+        logger.Debug("处理ClickHouse字段 #%d: %s (类型: %s)", i+1, fieldConverter.originName(), fieldConverter.originType())
+
+        ckField := NewCKField(fieldConverter)
+
+        logger.Debug("开始映射StarRocks字段...")
+        srField, err := v.MapSRField(fieldConverter, v.sr.nameMap)
+        if err != nil {
+            // 如果ClickHouse字段在StarRocks中不存在，跳过该字段而不是报错
+            logger.Warn("ClickHouse字段 '%s' 在StarRocks中不存在，跳过该字段", fieldConverter.originName())
+            skippedFields++
+            continue
+        }
+        logger.Debug("成功映射到StarRocks字段: %s", srField.Name)
+
+        logger.Debug("生成StarRocks字段子句...")
+        srField.GenClause()
+        v.sr.addClauseField(srField)
+
+        logger.Debug("设置ClickHouse字段的StarRocks映射...")
+        ckField.SetSRField(srField)
+        logger.Debug("生成ClickHouse字段子句...")
+        ckField.GenClause()
+        v.ck.addClauseField(ckField)
+
+        processedFields++
+        logger.Debug("字段 %s 处理完成", fieldConverter.originName())
+    }
+
+    logger.Debug("字段处理完成 - 总数: %d, 处理: %d, 跳过: %d", len(v.ck.converters), processedFields, skippedFields)
+    logger.Debug("最终映射的字段数量 - ClickHouse: %d, StarRocks: %d", len(v.ck.fields), len(v.sr.fields))
+
+    if len(v.ck.fields) == 0 {
+        logger.Error("ClickHouse字段为空，无法创建视图")
+        return fmt.Errorf("ck field is empty")
+    }
+
+    // 添加详细的字段映射验证日志
+    logger.Debug("开始字段映射验证 - StarRocks字段总数: %d, 已映射字段数: %d", len(v.sr.nameMap), len(v.sr.fields))
+
+    // 添加字段名称统计
+    fieldNames := make(map[string]int)
+    for _, field := range v.sr.fields {
+        fieldNames[field.Name]++
+    }
+
+    duplicateFieldNames := make([]string, 0)
+    for name, count := range fieldNames {
+        if count > 1 {
+            duplicateFieldNames = append(duplicateFieldNames, fmt.Sprintf("%s(x%d)", name, count))
+        }
+    }
+
+    if len(duplicateFieldNames) > 0 {
+        logger.Error("发现重复的字段名: %v", duplicateFieldNames)
+    }
+
+    logger.Debug("字段名称统计完成 - 唯一字段名: %d, 重复字段名: %d", len(fieldNames), len(duplicateFieldNames))
+
+    if len(v.sr.fields) != len(v.sr.nameMap) {
+        var err error
+        var fs []SRField
+        nameMapCopy := make(map[string]SRField)
+        maps.Copy(nameMapCopy, v.sr.nameMap)
+
+        logger.Debug("检查字段映射一致性...")
+        for i, f := range v.sr.fields {
+            logger.Debug("检查字段 #%d: %s", i+1, f.Name)
+            if _, ok := v.sr.nameMap[f.Name]; !ok {
+                logger.Warn("字段 %s 在nameMap中不存在", f.Name)
+                fs = append(fs, f)
+            } else {
+                delete(nameMapCopy, f.Name)
+            }
+        }
+
+        if len(fs) != 0 {
+            logger.Error("发现不存在于DDL中的字段: %+v", fs)
+            err = fmt.Errorf("build select column in view error, some fields not exists in create sql ddl: %+v", fs)
+        }
+        if len(nameMapCopy) != 0 {
+            var lackfs []SRField
+            for _, f := range nameMapCopy {
+                lackfs = append(lackfs, f)
+            }
+            logger.Error("发现存在于DDL但未映射的字段: %+v", lackfs)
+            if err != nil {
+                err = fmt.Errorf("%w, and some fields exists in create sql ddl but not in view select: %+v", err, lackfs)
+            } else {
+                err = fmt.Errorf("build select column in view error, some fields exists in create sql ddl but not in view select: %+v", lackfs)
+            }
+        }
+
+        // 如果err仍然为nil，说明字段数量不匹配但没有具体的错误字段，这是一个异常情况
+        if err == nil {
+            err = fmt.Errorf("字段映射数量不匹配: sr.fields数量=%d, sr.nameMap数量=%d, 但未发现具体的不匹配字段", len(v.sr.fields), len(v.sr.nameMap))
+        }
+
+        logger.Error("字段映射验证失败: %v", err)
+        return err
+    }
+
+    logger.Debug("字段映射验证通过")
+    return nil
+}
+
 
 // BuildAlter 生成 ALTER VIEW SQL（便捷方法）
 func (v *ViewBuilder) BuildAlter() (string, error) {
     return v.BuildWithType(SQLTypeAlter)
+}
+
+// BuildAlterWithPartition 使用提供的分区时间值生成 ALTER VIEW SQL
+// partitionValue: 原始字符串形式的时间值
+// isNumeric: 为true则按数值直接使用；为false则按字符串加引号
+func (v *ViewBuilder) BuildAlterWithPartition(partitionValue string, isNumeric bool) (string, error) {
+    logger.Debug("开始构建带分区值的ALTER VIEW，值: %s，isNumeric=%v", partitionValue, isNumeric)
+    // 强制执行完整的字段映射与校验逻辑，保持与 BuildWithType 一致
+    if err := v.PrepareAndValidate(); err != nil {
+        return "", err
+    }
+
+    // 在完成校验后再生成查询SQL，避免绕过校验
+    ckQ := v.ck.GenQuerySQL()
+    srQ := v.sr.GenQuerySQL()
+    logger.Debug("生成的ClickHouse查询SQL:\n%s", ckQ)
+    logger.Debug("生成的StarRocks查询SQL:\n%s", srQ)
+
+    // 获取时间戳列名
+    timestampColumn := v.getTimestampColumnName(v.sr.Name)
+
+    // 处理分区值的格式
+    minTimestamp := partitionValue
+    if !isNumeric {
+        if !strings.HasPrefix(minTimestamp, "'") {
+            minTimestamp = "'" + minTimestamp + "'"
+        }
+    }
+
+    sql := v.ComposeFinalSQL(SQLTypeAlter, ckQ, srQ, timestampColumn, minTimestamp)
+    logger.Debug("最终视图SQL(带分区值):\n%s", sql)
+    return sql, nil
 }
 
 // getTimestampColumnName 根据配置获取指定表的时间戳列名，如果没有配置则返回默认的recordTimestamp
@@ -428,9 +469,9 @@ func (v *ViewBuilder) formatTimestampValue(value string, dataType string) (strin
 // 	var minTimestamp string
 
 func (v *ViewBuilder) GenViewSQLWithType(ckQ, srQ string, sqlType string) (string, error) {
-	logger.Debug("开始生成视图SQL (类型: %s)", sqlType)
-	logger.Debug("ClickHouse查询SQL: %s", ckQ)
-	logger.Debug("StarRocks查询SQL: %s", srQ)
+    logger.Debug("开始生成视图SQL (类型: %s)", sqlType)
+    logger.Debug("ClickHouse查询SQL: %s", ckQ)
+    logger.Debug("StarRocks查询SQL: %s", srQ)
 
 	// 获取时间戳列名和数据类型
 	timestampColumn := v.getTimestampColumnName(v.sr.Name)
@@ -502,19 +543,21 @@ func (v *ViewBuilder) GenViewSQLWithType(ckQ, srQ string, sqlType string) (strin
 	default:
 		return "", fmt.Errorf("未知的时间戳数据类型: %s", timestampType)
 	}
-	// 根据SQL类型生成不同的语句
-	var sql string
-	// 生成视图SQL，ClickHouse使用 < 条件，StarRocks使用 >= 条件
-	sql = fmt.Sprintf("%s.%s as \n%s \nwhere %s < %s \nunion all \n%s \nwhere %s >= %s; \n",
-		v.dbName, v.viewName, ckQ, timestampColumn, minTimestamp, srQ, timestampColumn, minTimestamp)
-    if sqlType == SQLTypeAlter {
-        sql = "alter view " + sql
-    } else {
-        sql = "create view if not exists " + sql
-    }
+    // 统一封装最终SQL拼接
+    sql := v.ComposeFinalSQL(sqlType, ckQ, srQ, timestampColumn, minTimestamp)
 
 	logger.Debug("最终视图SQL:\n%s", sql)
 	return sql, nil
+}
+
+// ComposeFinalSQL 封装最终的 CREATE/ALTER 视图SQL拼接
+func (v *ViewBuilder) ComposeFinalSQL(sqlType, ckQ, srQ, timestampColumn, minTimestamp string) string {
+    body := fmt.Sprintf("%s.%s as \n%s \nwhere %s < %s \nunion all \n%s \nwhere %s >= %s; \n",
+        v.dbName, v.viewName, ckQ, timestampColumn, minTimestamp, srQ, timestampColumn, minTimestamp)
+    if sqlType == SQLTypeAlter {
+        return "alter view " + body
+    }
+    return "create view if not exists " + body
 }
 
 // 是rowLogAlias

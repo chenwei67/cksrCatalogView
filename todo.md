@@ -9,6 +9,7 @@
 8. ck和sr的连接要池化，连接池要支持并发使用，新增的连接池的参数要配置化，默认值要前移到onfig/config.go。且同步到同步到 k8s/configmap.yaml。
 9. 要对日志做模式管理，区分不同模式的日志，如init、rollback、update等
 10. update中生成alter view粗暴使用了字符串替换，要改
+11. 新增一个子命令，类似于update，但不是常驻进程，而是根据命令行参数传入的数据库对的名称和sr的表名列表，来更新对应的表。
 
 # 要求
 1. 不要考虑 backward compatibility

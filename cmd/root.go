@@ -28,9 +28,10 @@ func NewRootCmd() *cobra.Command {
 	rootCmd.PersistentFlags().String("log-level", "INFO", "日志级别 (SILENT, ERROR, WARN, INFO, DEBUG)")
 
 	// 注册子命令
-	rootCmd.AddCommand(NewInitCmd())
-	rootCmd.AddCommand(NewUpdateCmd())
-	rootCmd.AddCommand(NewRollbackCmd())
+    rootCmd.AddCommand(NewInitCmd())
+    rootCmd.AddCommand(NewAutoUpdateCmd())
+    rootCmd.AddCommand(NewUpdateCmd())
+    rootCmd.AddCommand(NewRollbackCmd())
 
 	return rootCmd
 }
