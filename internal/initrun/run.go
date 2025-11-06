@@ -211,19 +211,10 @@ func (im *InitManager) processTable(plan TableInitPlan, ckSchemaMap map[string]s
     // 如需重命名 SR 原生表：基础名 -> 后缀名
     actualSRTable := plan.BaseTable
     if plan.NeedRename {
-        isNative, err := im.dbManager.CheckStarRocksTableIsNative(plan.BaseTable)
-        if err != nil {
-            return fmt.Errorf("检查表 %s 类型失败: %w", plan.BaseTable, err)
-        }
-        if isNative {
-            newName := plan.BaseTable + im.pair.SRTableSuffix
-            renameSQL := fmt.Sprintf("ALTER TABLE `%s`.`%s` RENAME `%s`", im.pair.StarRocks.Database, plan.BaseTable, newName)
-            if err := im.dbManager.ExecuteStarRocksSQL(renameSQL); err != nil {
-                return fmt.Errorf("执行StarRocks重命名失败(%s -> %s): %w", plan.BaseTable, newName, err)
-            }
-            actualSRTable = newName
-        } else {
-                return fmt.Errorf("StarRocks %s 需要重命名，却不是原生表", actualSRTable)
+        actualSRTable = plan.BaseTable + im.pair.SRTableSuffix
+        renameSQL := fmt.Sprintf("ALTER TABLE `%s`.`%s` RENAME `%s`", im.pair.StarRocks.Database, plan.BaseTable, actualSRTable)
+        if err = im.dbManager.ExecuteStarRocksSQL(renameSQL); err != nil {
+            return fmt.Errorf("执行StarRocks重命名失败(%s -> %s): %w", plan.BaseTable, actualSRTable, err)
         }
     }
 
