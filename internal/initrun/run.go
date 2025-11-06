@@ -53,6 +53,10 @@ func Run(cfg *config.Config) error {
 
 // ExecuteInit 执行单个数据库对的完整初始化流程
 func (im *InitManager) ExecuteInit() error {
+    // 主动初始化数据库连接（池）
+    if err := im.dbManager.Init(); err != nil {
+        return fmt.Errorf("初始化数据库连接失败: %w", err)
+    }
     // 1) 导出 CK 表结构（重试由 database 层统一封装）
     logger.Info("正在导出ClickHouse表结构...")
     ckSchemaMap, err := im.dbManager.ExportClickHouseTables()
@@ -195,7 +199,11 @@ func (im *InitManager) processTable(plan TableInitPlan, ckSchemaMap map[string]s
     alterBuilder := builder.NewCKAddColumnsBuilder(fieldConverters, ckTable.DDL.DBName, ckTable.DDL.TableName)
     alterSQL := alterBuilder.Build()
     if strings.TrimSpace(alterSQL) != "" {
-        if err = im.dbManager.ExecuteBatchSQL([]string{alterSQL}, true); err != nil {
+        ckDB, errConn := im.dbManager.GetClickHouseConnection()
+        if errConn != nil {
+            return fmt.Errorf("获取ClickHouse连接失败: %w", errConn)
+        }
+        if err = im.dbManager.ExecuteBatchSQLWithDB(ckDB, []string{alterSQL}, true); err != nil {
             return fmt.Errorf("执行ClickHouse ALTER TABLE失败(表 %s): %w", plan.BaseTable, err)
         }
     }
@@ -243,7 +251,11 @@ func (im *InitManager) processTable(plan TableInitPlan, ckSchemaMap map[string]s
         return fmt.Errorf("构建视图失败(%s.%s): %w", im.pair.StarRocks.Database, plan.BaseTable, err)
     }
     if strings.TrimSpace(viewSQL) != "" {
-        if err := im.dbManager.ExecuteBatchSQL([]string{viewSQL}, false); err != nil {
+        srDBConn, errConn := im.dbManager.GetStarRocksConnection()
+        if errConn != nil {
+            return fmt.Errorf("获取StarRocks连接失败: %w", errConn)
+        }
+        if err := im.dbManager.ExecuteBatchSQLWithDB(srDBConn, []string{viewSQL}, false); err != nil {
             return fmt.Errorf("执行CREATE VIEW失败(%s.%s): %w", im.pair.StarRocks.Database, plan.BaseTable, err)
         }
     }

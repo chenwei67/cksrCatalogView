@@ -1,6 +1,7 @@
 package cmd
 
 import (
+    "cksr/database"
     "cksr/internal/initrun"
     "cksr/logger"
     "github.com/spf13/cobra"
@@ -19,6 +20,8 @@ func NewInitCmd() *cobra.Command {
                 return err
             }
             defer logger.CloseLogFile()
+            // 统一在退出前关闭连接池
+            defer database.CloseAll()
             return initrun.Run(cfg)
         },
     }

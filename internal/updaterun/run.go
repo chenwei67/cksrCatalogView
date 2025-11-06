@@ -177,19 +177,21 @@ func (vu *ViewUpdater) updateAllViews() error {
 
 // updateViewsForPair 更新单个数据库对的视图
 func (vu *ViewUpdater) updateViewsForPair(dbManager *database.DatabasePairManager, pair config.DatabasePair) error {
+    // 主动初始化连接池，未初始化不允许继续
+    if err := dbManager.Init(); err != nil {
+        return fmt.Errorf("初始化数据库连接失败: %w", err)
+    }
     // 获取StarRocks连接
     srDB, err := dbManager.GetStarRocksConnection()
     if err != nil {
         return fmt.Errorf("获取StarRocks连接失败: %w", err)
     }
-    defer srDB.Close()
 
     // 获取ClickHouse连接
     chDB, err := dbManager.GetClickHouseConnection()
     if err != nil {
         return fmt.Errorf("获取ClickHouse连接失败: %w", err)
     }
-    defer chDB.Close()
 
     // 获取所有视图
     views, err := vu.getAllViews(srDB, pair.StarRocks.Database)

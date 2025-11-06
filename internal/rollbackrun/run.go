@@ -84,6 +84,10 @@ func NewRollbackManager(cfg *config.Config, pairIndex int) *RollbackManager {
 
 // ExecuteRollback 执行完整的回退操作
 func (rm *RollbackManager) ExecuteRollback() error {
+    // 主动初始化数据库连接（池）
+    if err := rm.dbManager.Init(); err != nil {
+        return fmt.Errorf("初始化数据库连接失败: %w", err)
+    }
     logger.Info("开始执行回退操作（两阶段），数据库对: %s", rm.pair.Name)
     plans, err := rm.findRollbackPlans()
     if err != nil {
@@ -234,6 +238,15 @@ func (rm *RollbackManager) findRollbackPlans() ([]TableRollbackPlan, error) {
 
 // 针对单表执行回退计划：删视图 -> 去后缀 -> 删CK列
 func (rm *RollbackManager) executeRollbackPlan(plan TableRollbackPlan) error {
+    // 复用已初始化的连接
+    srDBConn, err := rm.dbManager.GetStarRocksConnection()
+    if err != nil {
+        return fmt.Errorf("获取StarRocks连接失败: %w", err)
+    }
+    ckDBConn, err := rm.dbManager.GetClickHouseConnection()
+    if err != nil {
+        return fmt.Errorf("获取ClickHouse连接失败: %w", err)
+    }
     srDB := rm.pair.StarRocks.Database
     ckDB := rm.pair.ClickHouse.Database
     suffix := rm.pair.SRTableSuffix
@@ -250,7 +263,7 @@ func (rm *RollbackManager) executeRollbackPlan(plan TableRollbackPlan) error {
     // 1. 删除VIEW（仅当计划指示需要删除视图时执行）
     if plan.NeedDropView {
         dropViewSQL := builder.NewRollbackBuilder(srDB, plan.BaseTable).BuildDropViewSQL()
-        if err := rm.dbManager.ExecuteRollbackSQL([]string{dropViewSQL}, false); err != nil {
+        if err := rm.dbManager.ExecuteRollbackSQLWithDB(srDBConn, []string{dropViewSQL}, false); err != nil {
             return &FailureRecord{Table: plan.BaseTable, Step: StepDropView, Err: fmt.Errorf("删除视图 %s 失败(原因: %s): %w", plan.BaseTable, plan.DropViewReason, err)}
         }
         logger.Info("已删除视图(若存在): %s.%s，原因: %s", srDB, plan.BaseTable, plan.DropViewReason)
@@ -262,7 +275,7 @@ func (rm *RollbackManager) executeRollbackPlan(plan TableRollbackPlan) error {
     if plan.NeedRename {
         renameSQL := builder.NewRollbackBuilder(srDB, plan.SuffixedTable).BuildRenameSRTableSQL(suffix)
         if renameSQL != "" {
-            if err := rm.dbManager.ExecuteRollbackSQL([]string{renameSQL}, false); err != nil {
+            if err := rm.dbManager.ExecuteRollbackSQLWithDB(srDBConn, []string{renameSQL}, false); err != nil {
                 return &FailureRecord{Table: plan.BaseTable, Step: StepRenameSuffix, Err: fmt.Errorf("去除后缀重命名 %s -> %s 失败(原因: %s): %w", plan.SuffixedTable, plan.BaseTable, plan.RenameReason, err)}
             }
             logger.Info("已去除后缀并重命名: %s.%s -> %s，原因: %s", srDB, plan.SuffixedTable, plan.BaseTable, plan.RenameReason)
@@ -276,7 +289,7 @@ func (rm *RollbackManager) executeRollbackPlan(plan TableRollbackPlan) error {
         for _, c := range plan.CKAddedColumns {
             dropCKSQLs = append(dropCKSQLs, rb.BuildDropCKColumnSQL(c))
         }
-        if err := rm.dbManager.ExecuteRollbackSQL(dropCKSQLs, true); err != nil {
+        if err := rm.dbManager.ExecuteRollbackSQLWithDB(ckDBConn, dropCKSQLs, true); err != nil {
             return &FailureRecord{Table: plan.BaseTable, Step: StepDropCKCols, Err: fmt.Errorf("删除CK列失败(表 %s): %w", plan.BaseTable, err)}
         }
         logger.Info("已删除CK表 %s 的 %d 个新增列", plan.BaseTable, len(dropCKSQLs))
@@ -325,6 +338,9 @@ func ExecuteRollbackForAllPairs(cfg *config.Config) error {
     successTables := 0
     var failedAll []FailureRecord
 
+    // 缓存每个库对的管理器，便于在全部表处理完成后统一删除各自的Catalog
+    var managers []*RollbackManager
+
     for i, pair := range cfg.DatabasePairs {
         logger.Info("开始回退数据库对: %s", pair.Name)
 
@@ -344,6 +360,9 @@ func ExecuteRollbackForAllPairs(cfg *config.Config) error {
 
         logger.Info("数据库对 %s 回退完成", pair.Name)
 		rollbackManager.printPairSummary()
+
+        // 保存管理器以便稍后删除本库对的Catalog（复用已初始化的连接）
+        managers = append(managers, rollbackManager)
     }
 
     // 全局统计打印
@@ -355,48 +374,33 @@ func ExecuteRollbackForAllPairs(cfg *config.Config) error {
             logger.Error("[%d] 库对: %s, 表: %s, 步骤: %s, 错误: %v", i+1, f.Pair, f.Table, string(f.Step), f.Err)
         }
     }
-    // 第二阶段：所有数据库对处理完后，统一删除 Catalog（存在性检查）
-    if err := dropAllCatalogsAfterAllPairs(cfg); err != nil {
-        return err
+    // 第二阶段：所有数据库对表处理完成后，逐库对删除各自的Catalog（DROP CATALOG IF EXISTS）
+    for _, m := range managers {
+        if err := m.DropCatalogIfExists(); err != nil {
+            return err
+        }
     }
     logger.Info("所有数据库对回退与Catalog清理完成")
     return nil
 }
 
-// 在所有数据库对处理完后统一删除 Catalog（避免复用导致误删）
-func dropAllCatalogsAfterAllPairs(cfg *config.Config) error {
-    // 收集唯一的 Catalog 名称
-    catalogSet := make(map[string]struct{})
-    for _, p := range cfg.DatabasePairs {
-        if p.CatalogName != "" {
-            catalogSet[p.CatalogName] = struct{}{}
-        }
+// DropCatalogIfExists 在当前库对上删除自身的Catalog（复用连接）
+func (rm *RollbackManager) DropCatalogIfExists() error {
+    name := rm.pair.CatalogName
+    if strings.TrimSpace(name) == "" {
+        return fmt.Errorf("数据库对 %s 未配置 CatalogName", rm.pair.Name)
     }
-    if len(catalogSet) == 0 {
-        return fmt.Errorf("未配置任何Catalog名称")
+    // 复用已初始化的 StarRocks 连接
+    srDB, err := rm.dbManager.GetStarRocksConnection()
+    if err != nil {
+        return fmt.Errorf("获取StarRocks连接失败: %w", err)
     }
-
-    rollbackBuilder := builder.NewRollbackBuilder("", "")
-
-    // 遍历所有数据库对，逐一检查并删除Catalog（只删一次）
-    for i := range cfg.DatabasePairs {
-        dm := database.NewDatabasePairManager(cfg, i)
-        for name := range catalogSet {
-            exists, err := dm.CheckStarRocksCatalogExists(name)
-            if err != nil {
-                return fmt.Errorf("检查Catalog %s 是否存在失败: %w", name, err)
-            }
-            if exists {
-                sql := rollbackBuilder.BuildDropCatalogSQL(name)
-                if err := dm.ExecuteRollbackSQL([]string{sql}, false); err != nil {
-                    return fmt.Errorf("删除Catalog %s 失败: %w", name, err)
-                }
-                logger.Info("已删除Catalog: %s", name)
-                // 删除后不再重复处理该 Catalog
-                delete(catalogSet, name)
-            }
-        }
+    sql := builder.NewRollbackBuilder("", "").BuildDropCatalogSQL(name)
+    logger.Info("开始删除库对 %s 的Catalog: %s", rm.pair.Name, name)
+    if err := rm.dbManager.ExecuteRollbackSQLWithDB(srDB, []string{sql}, false); err != nil {
+        return fmt.Errorf("删除库对 %s 的Catalog %s 失败: %w", rm.pair.Name, name, err)
     }
+    logger.Info("已删除库对 %s 的Catalog: %s", rm.pair.Name, name)
     return nil
 }
 

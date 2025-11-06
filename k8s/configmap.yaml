@@ -6,20 +6,67 @@ metadata:
 data:
   config.json: |
     {
-      "clickhouse": {
-        "host": "clickhouse-service",
-        "port": 9000,
-        "username": "default",
-        "password": "your-clickhouse-password",
-        "database": "your-database"
-      },
-      "starrocks": {
-        "host": "starrocks-service",
-        "port": 9030,
-        "username": "root",
-        "password": "your-starrocks-password",
-        "database": "your-database"
-      },
+      "database_pairs": [
+        {
+          "name": "default",
+          "catalog_name": "default_catalog",
+          "sr_table_suffix": "_local_catalog",
+          "clickhouse": {
+            "host": "clickhouse-service",
+            "port": 9000,
+            "http_port": 8123,
+            "username": "default",
+            "password": "your-clickhouse-password",
+            "database": "your-database",
+            "distributed_ddl_task_timeout_seconds": 3600,
+            "conn_timeout_seconds": 30,
+            "read_timeout_seconds": 60,
+            "write_timeout_seconds": 60,
+            "jdbc_socket_timeout_ms": 300000,
+            "jdbc_connection_timeout_ms": 30000,
+            "pool_max_open_conns": 30,
+            "pool_max_idle_conns": 15,
+            "pool_conn_max_idle_seconds": 300,
+            "pool_conn_max_lifetime_seconds": 1800
+          },
+          "starrocks": {
+            "host": "starrocks-service",
+            "port": 9030,
+            "username": "root",
+            "password": "your-starrocks-password",
+            "database": "your-database",
+            "conn_timeout_seconds": 30,
+            "read_timeout_seconds": 60,
+            "write_timeout_seconds": 60,
+            "pool_max_open_conns": 30,
+            "pool_max_idle_conns": 15,
+            "pool_conn_max_idle_seconds": 300,
+            "pool_conn_max_lifetime_seconds": 1800
+          }
+        }
+      ],
       "temp_dir": "/tmp/cksr",
-      "driver_url": "http://your-driver-host/clickhouse-jdbc-0.4.6-all.jar"
+      "driver_url": "http://your-driver-host/clickhouse-jdbc-0.4.6-all.jar",
+      "log": {
+        "enable_file_log": true,
+        "log_file_path": "",
+        "log_level": "INFO"
+      },
+      "retry": {
+        "max_retries": 3,
+        "delay_ms": 100
+      },
+      "view_updater": {
+        "cron_expression": "0 0 2 * * *"
+      },
+      "parser": {
+        "ddl_parse_timeout_seconds": 60
+      },
+      "lock": {
+        "debug_mode": false,
+        "k8s_namespace": "olap",
+        "lease_name": "cksr-lock",
+        "identity": "cksr-instance",
+        "lock_duration_seconds": 300
+      }
     }

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+    "cksr/database"
     "cksr/internal/rollbackrun"
     "cksr/logger"
     "github.com/spf13/cobra"
@@ -19,6 +20,8 @@ func NewRollbackCmd() *cobra.Command {
                 return err
             }
             defer logger.CloseLogFile()
+            // 统一在退出前关闭连接池
+            defer database.CloseAll()
 
             logger.Info("开始执行回退操作...")
             if err := rollbackrun.Run(cfg); err != nil {

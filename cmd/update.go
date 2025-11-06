@@ -1,6 +1,7 @@
 package cmd
 
 import (
+    "cksr/database"
     "cksr/logger"
     "cksr/internal/updaterun"
     "github.com/spf13/cobra"
@@ -19,6 +20,8 @@ func NewUpdateCmd() *cobra.Command {
                 return err
             }
             defer logger.CloseLogFile()
+            // 统一在退出前关闭连接池
+            defer database.CloseAll()
 
             logger.Info("启动视图更新器...")
             return updaterun.Run(cfg)

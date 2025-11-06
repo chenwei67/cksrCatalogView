@@ -443,11 +443,10 @@ func (v *ViewBuilder) GenViewSQLWithType(ckQ, srQ string, sqlType string) (strin
 	// 查询最小时间戳，使用通用的重试wrapper
 	var minTimestamp string
 
-	db, err := v.dbManager.GetStarRocksConnection()
-	if err != nil {
-		return "", fmt.Errorf("获取StarRocks连接失败: %w", err)
-	}
-	defer db.Close()
+    db, err := v.dbManager.GetStarRocksConnection()
+    if err != nil {
+        return "", fmt.Errorf("获取StarRocks连接失败: %w", err)
+    }
 
 	// 根据数据类型选择不同的扫描方式
 	switch strings.ToLower(timestampType) {

@@ -34,6 +34,11 @@ type ClickHouseConfig struct {
     JDBCSocketTimeoutMs int `json:"jdbc_socket_timeout_ms"`
     // JDBC 连接超时（毫秒）- 生成 JDBC URI 时使用
     JDBCConnectionTimeoutMs int `json:"jdbc_connection_timeout_ms"`
+    // 连接池参数（并发安全，应用于 database/sql）
+    PoolMaxOpenConns          int `json:"pool_max_open_conns"`
+    PoolMaxIdleConns          int `json:"pool_max_idle_conns"`
+    PoolConnMaxIdleSeconds    int `json:"pool_conn_max_idle_seconds"`
+    PoolConnMaxLifetimeSeconds int `json:"pool_conn_max_lifetime_seconds"`
 }
 
 // StarRocksConfig StarRocks 数据库连接配置
@@ -49,6 +54,11 @@ type StarRocksConfig struct {
     ReadTimeoutSeconds int `json:"read_timeout_seconds"`
     // 写超时（秒）
     WriteTimeoutSeconds int `json:"write_timeout_seconds"`
+    // 连接池参数（并发安全，应用于 database/sql）
+    PoolMaxOpenConns          int `json:"pool_max_open_conns"`
+    PoolMaxIdleConns          int `json:"pool_max_idle_conns"`
+    PoolConnMaxIdleSeconds    int `json:"pool_conn_max_idle_seconds"`
+    PoolConnMaxLifetimeSeconds int `json:"pool_conn_max_lifetime_seconds"`
 }
 
 // DatabasePair 数据库对配置，包含一个ClickHouse和一个StarRocks数据库
@@ -247,6 +257,24 @@ func LoadConfig(configPath string) (*Config, error) {
             pair.ClickHouse.JDBCConnectionTimeoutMs = 30000
         }
 
+        // ClickHouse 连接池参数默认与校验
+        if pair.ClickHouse.PoolMaxOpenConns < 0 || pair.ClickHouse.PoolMaxIdleConns < 0 ||
+            pair.ClickHouse.PoolConnMaxIdleSeconds < 0 || pair.ClickHouse.PoolConnMaxLifetimeSeconds < 0 {
+            return nil, fmt.Errorf("数据库对 %s 的 ClickHouse 连接池参数不能为负数", pair.Name)
+        }
+        if pair.ClickHouse.PoolMaxOpenConns == 0 {
+            pair.ClickHouse.PoolMaxOpenConns = 30
+        }
+        if pair.ClickHouse.PoolMaxIdleConns == 0 {
+            pair.ClickHouse.PoolMaxIdleConns = 15
+        }
+        if pair.ClickHouse.PoolConnMaxIdleSeconds == 0 {
+            pair.ClickHouse.PoolConnMaxIdleSeconds = 300
+        }
+        if pair.ClickHouse.PoolConnMaxLifetimeSeconds == 0 {
+            pair.ClickHouse.PoolConnMaxLifetimeSeconds = 1800
+        }
+
         // StarRocks 连接参数校验与默认
         if pair.StarRocks.Host == "" {
             return nil, fmt.Errorf("数据库对 %s 的 StarRocks.host 不能为空", pair.Name)
@@ -268,6 +296,24 @@ func LoadConfig(configPath string) (*Config, error) {
         }
         if pair.StarRocks.WriteTimeoutSeconds == 0 {
             pair.StarRocks.WriteTimeoutSeconds = 60
+        }
+
+        // StarRocks 连接池参数默认与校验
+        if pair.StarRocks.PoolMaxOpenConns < 0 || pair.StarRocks.PoolMaxIdleConns < 0 ||
+            pair.StarRocks.PoolConnMaxIdleSeconds < 0 || pair.StarRocks.PoolConnMaxLifetimeSeconds < 0 {
+            return nil, fmt.Errorf("数据库对 %s 的 StarRocks 连接池参数不能为负数", pair.Name)
+        }
+        if pair.StarRocks.PoolMaxOpenConns == 0 {
+            pair.StarRocks.PoolMaxOpenConns = 30
+        }
+        if pair.StarRocks.PoolMaxIdleConns == 0 {
+            pair.StarRocks.PoolMaxIdleConns = 15
+        }
+        if pair.StarRocks.PoolConnMaxIdleSeconds == 0 {
+            pair.StarRocks.PoolConnMaxIdleSeconds = 300
+        }
+        if pair.StarRocks.PoolConnMaxLifetimeSeconds == 0 {
+            pair.StarRocks.PoolConnMaxLifetimeSeconds = 1800
         }
     }
 
