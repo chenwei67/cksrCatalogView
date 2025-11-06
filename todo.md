@@ -10,6 +10,9 @@
 9. 要对日志做模式管理，区分不同模式的日志，如init、rollback、update等
 10. update中生成alter view粗暴使用了字符串替换，要改
 11. 新增一个子命令，类似于update，但不是常驻进程，而是根据命令行参数传入的数据库对的名称和sr的表名列表，来更新对应的表。
+12. 要支持sr中的新字段和类型`rowLogAlias` varchar(65533) NULL AS ...，注意后续内容我省略了。关键是要确定parser是否支持解析这个字段，以及是否需要对这个字段做特殊处理。
+
+
 
 # 要求
 1. 不要考虑 backward compatibility

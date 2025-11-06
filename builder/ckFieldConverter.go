@@ -96,18 +96,11 @@ func NewConverters(table parser.Table) ([]FieldConverter, error) {
 	}
 
 	processedCount := 0
-	skippedMaterialized := 0
 	skippedAdded := 0
 
 	for i, f := range table.Field {
 		if i > 0 && i%50 == 0 {
 			logger.Debug("NewConverters进度: 已处理 %d/%d 字段", i, len(table.Field))
-		}
-
-		// 忽略物化字段
-		if f.IsMaterialized {
-			skippedMaterialized++
-			continue
 		}
 
 		// 过滤掉通过add column操作新增的字段
@@ -126,8 +119,8 @@ func NewConverters(table parser.Table) ([]FieldConverter, error) {
 		processedCount++
 	}
 
-	logger.Debug("NewConverters完成 - 总字段: %d, 处理: %d, 跳过物化: %d, 跳过新增: %d",
-		len(table.Field), processedCount, skippedMaterialized, skippedAdded)
+	logger.Debug("NewConverters完成 - 总字段: %d, 处理: %d, 跳过新增: %d",
+		len(table.Field), processedCount, skippedAdded)
 
 	return res, nil
 }

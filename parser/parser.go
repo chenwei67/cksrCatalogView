@@ -87,19 +87,6 @@ func ParserTableSQL(s string) Table {
 			}
 			continue
 		}
-		if t.parserIndex(line) {
-			continue
-		}
-		if t.parserEngine(line) {
-			logger.Debug("解析到引擎: %s", t.DDL.Engine)
-			continue
-		}
-		if t.parserPartitionss(line) {
-			continue
-		}
-		if t.parserOrderBy(line) {
-			continue
-		}
 		if t.parserTTL(line) {
 			continue
 		}

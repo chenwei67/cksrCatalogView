@@ -135,135 +135,19 @@ func fetchWord(ss string, begin int) (string, int) {
 
 func (t *Table) parserField(s string) bool {
 	indexStr := "`"
-	sLen := len([]rune(s))
 	if !strings.HasPrefix(s, indexStr) {
 		return false
 	}
 	var fd = Field{}
 	var index int
 	fd.Name, index = fetchWord(s, index)
-	fd.Type, index = fetchWord(s, index)
+	fd.Type, _ = fetchWord(s, index)
 	fd.Name = strings.ReplaceAll(fd.Name, "`", "")
 
-	for index < sLen-1 {
-		var keywork, keyVal string
-		keywork, index = fetchWord(s, index)
-		keyVal, index = fetchWord(s, index)
-		switch strings.ToLower(strings.TrimSpace(keywork)) {
-		case "default":
-			fd.Default = &keyVal
-		case "comment":
-			fd.Comment = &keyVal
-		case "alias":
-			fd.IsAlias = true
-			if strings.Contains(s, "rowLogAlias") {
-				tmpStr := strings.ReplaceAll(keyVal, "'", "")
-				tmpStr = strings.ReplaceAll(tmpStr, " ", "")
-				if len(tmpStr) != 0 {
-					if strings.Contains(tmpStr, "[") {
-						star := strings.Index(tmpStr, "[")
-						end := strings.Index(tmpStr, "]")
-						slice := strings.Split(tmpStr[star+1:end], ",")
-						for _, val := range slice {
-							if t.FullSearchFields == nil {
-								t.FullSearchFields = make(map[string]string)
-							}
-							t.FullSearchFields[strings.TrimSpace(val)] = ""
-						}
-					} else {
-						tmpStr2 := fetchValFromFunc(tmpStr)
-						slice := strings.Split(tmpStr2, ",")
-						for _, val := range slice {
-							if t.FullSearchFields == nil {
-								t.FullSearchFields = make(map[string]string)
-							}
-							t.FullSearchFields[strings.TrimSpace(val)] = ""
-						}
-					}
-				}
-
-			}
-		case "materialized":
-			fd.IsMaterialized = true
-		}
-		if fd.Comment != nil && fd.Default != nil && fd.IsAlias {
-			break
-		}
-	}
 	t.Field = append(t.Field, fd)
 	return true
 }
 
-func (t *Table) parserIndex(s string) bool {
-	indexStr := "INDEX"
-	if !strings.HasPrefix(s, indexStr) {
-		return false
-	}
-	var index int
-	var indies Index
-	var indexFields string
-	_, index = fetchWord(s, index) // INDEX
-	indies.Name, index = fetchWord(s, index)
-	indexFields, index = fetchWord(s, index)
-	_, index = fetchWord(s, index) // TYPE
-	indies.Type, index = fetchWord(s, index)
-	indies.IF = strings.Contains(indexFields, "if(")
-	if indies.IF {
-		indies.Fields = append(indies.Fields, strings.Split(indexFields, ",")[1])
-	} else {
-		indexFields = strings.ReplaceAll(indexFields, "(", "")
-		indexFields = strings.ReplaceAll(indexFields, ")", "")
-		indexFields = strings.ReplaceAll(indexFields, " ", "")
-		indies.Fields = strings.Split(indexFields, ",")
-	}
-
-	t.Index = append(t.Index, indies)
-	return true
-
-}
-
-func (t *Table) parserEngine(s string) bool {
-	indexStr := "engine "
-	if !strings.HasPrefix(strings.ToLower(s), indexStr) {
-		return false
-	}
-	words := strings.Split(s, "=")
-	if len(words) <= 1 {
-		return false
-	}
-	t.DDL.Engine, _ = fetchWord(words[1], 0)
-	t.DDL.Engine = strings.TrimSpace(t.DDL.Engine)
-	return true
-
-}
-
-func (t *Table) parserPartitionss(s string) bool {
-	indexStr := "partition "
-	indexStr2 := "by"
-	tmpStr := strings.ToLower(s)
-	if strings.HasPrefix(tmpStr, indexStr) && strings.Contains(tmpStr, indexStr2) {
-		t.DDL.Partition = s
-		return true
-	}
-	return false
-}
-
-func (t *Table) parserOrderBy(s string) bool {
-	indexStr := "order "
-	indexStr2 := "by"
-	tmpStr := strings.ToLower(s)
-	if !(strings.HasPrefix(tmpStr, indexStr) && strings.Contains(tmpStr, indexStr2)) {
-		return false
-	}
-
-	s = strings.ReplaceAll(s, " ", "")
-	s = strings.ReplaceAll(s, "ORDERBY", "")
-	s = strings.ReplaceAll(s, "(", "")
-	s = strings.ReplaceAll(s, ")", "")
-	t.DDL.OrderBy = strings.Split(s, ",")
-
-	return true
-}
 
 func (t *Table) parserTTL(s string) bool {
 	indexStr := "ttl "

@@ -560,11 +560,6 @@ func (v *ViewBuilder) ComposeFinalSQL(sqlType, ckQ, srQ, timestampColumn, minTim
     return "create view if not exists " + body
 }
 
-// 是rowLogAlias
-func (f *CKField) Ignore() bool {
-	n := strings.ToLower(f.originName())
-	return n == "rowlogalias" || n == "_invert_text"
-}
 
 // 构建clause
 func (f *CKField) GenClause() {
