@@ -1,29 +1,28 @@
+# syntax=docker/dockerfile:1.4
 # 使用官方Go镜像作为构建环境
-FROM golang:1.23.5-alpine AS builder
+FROM mirrors.sangfor.com/golang:1.22 AS builder
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
 
 # 设置工作目录
 WORKDIR /app
-
-# 安装必要的包
-RUN apk add --no-cache git ca-certificates tzdata
 
 # 复制go mod文件
 COPY go.mod go.sum ./
 
 # 下载依赖
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
 # 复制源代码
 COPY . .
 
 # 构建应用
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o cksr .
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags "-s -w" -o cksr .
 
 # 使用轻量级的alpine镜像作为运行环境
-FROM alpine:latest
-
-# 安装ca-certificates用于HTTPS请求
-RUN apk --no-cache add ca-certificates tzdata
+FROM docker.sangfor.com/xaasos-public/alpine-base:3.18.3
 
 # 设置工作目录
 WORKDIR /root/
@@ -37,9 +36,10 @@ RUN mkdir -p /etc/cksr
 # 设置时区
 ENV TZ=Asia/Shanghai
 
-# 暴露端口（如果需要）
-# EXPOSE 8080
-
 # 运行应用
 ENTRYPOINT ["./cksr"]
 CMD ["/etc/cksr/config.json"]
+
+# 仅用于导出构建产物到宿主机（不用于运行）
+FROM scratch AS artifact
+COPY --from=builder /app/cksr /cksr
