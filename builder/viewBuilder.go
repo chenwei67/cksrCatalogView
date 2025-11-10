@@ -260,6 +260,35 @@ func (v *ViewBuilder) PrepareAndValidate() error {
         logger.Debug("字段 %s 处理完成", fieldConverter.originName())
     }
 
+    // 处理 SR 独有列：在 CK 子查询中补默认值占位，保证两侧列/类型一致
+    {
+        // 统计已映射的 SR 列名
+        mapped := make(map[string]bool)
+        for _, f := range v.sr.fields {
+            mapped[f.Name] = true
+        }
+
+        // 遍历 SR DDL 中的所有列，找出未映射的列
+        for name, sf := range v.sr.nameMap {
+            if mapped[name] {
+                continue
+            }
+			
+            logger.Warn("StarRocks 字段 '%s' 在 ClickHouse 中不存在，使用默认值在CK侧补列", name)
+
+            // SR 子句补充（保持视图两侧列顺序一致）
+            sf.GenClause()
+            v.sr.addClauseField(sf)
+
+            // CK 子句补充默认值占位，并别名为 SR 字段名
+            defaultClause := v.defaultCKClauseForSRField(sf)
+            ckField := CKField{}
+            ckField.SRField = sf
+            ckField.Clause = defaultClause
+            v.ck.addClauseField(ckField)
+        }
+    }
+
     logger.Debug("字段处理完成 - 总数: %d, 处理: %d, 跳过: %d", len(v.ck.converters), processedFields, skippedFields)
     logger.Debug("最终映射的字段数量 - ClickHouse: %d, StarRocks: %d", len(v.ck.fields), len(v.sr.fields))
 
@@ -335,6 +364,21 @@ func (v *ViewBuilder) PrepareAndValidate() error {
 
     logger.Debug("字段映射验证通过")
     return nil
+}
+
+// defaultCKClauseForSRField 为 SR 独有列生成 CK 子查询中的默认值占位表达式
+// 语义：将 CK 侧该列视为 SR 列的“默认空值”（统一使用 CAST NULL 保持类型一致；数组使用空数组字面量）
+func (v *ViewBuilder) defaultCKClauseForSRField(sf SRField) string {
+    t := strings.TrimSpace(sf.Type)
+    //upper := strings.ToUpper(t)
+
+    // 如果SR列声明了DEFAULT，则在CK子查询侧优先使用该默认值，并强制类型对齐
+    if strings.EqualFold(sf.DefaultKind, "DEFAULT") && strings.TrimSpace(sf.DefaultExpr) != "" {
+        return fmt.Sprintf("CAST(%s AS %s) as `%s`", sf.DefaultExpr, t, sf.Name)
+    }
+
+    // 无默认值：统一用 NULL，占位并按 SR 列类型对齐
+    return fmt.Sprintf("CAST(NULL AS %s) as `%s`", t, sf.Name)
 }
 
 

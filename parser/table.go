@@ -9,8 +9,8 @@
 package parser
 
 import (
-	"strings"
-	"cksr/logger"
+    "strings"
+    "cksr/logger"
 )
 
 func (t *Table) parserTableName(s string) bool {
@@ -134,18 +134,40 @@ func fetchWord(ss string, begin int) (string, int) {
 }
 
 func (t *Table) parserField(s string) bool {
-	indexStr := "`"
-	if !strings.HasPrefix(s, indexStr) {
-		return false
-	}
-	var fd = Field{}
-	var index int
-	fd.Name, index = fetchWord(s, index)
-	fd.Type, _ = fetchWord(s, index)
-	fd.Name = strings.ReplaceAll(fd.Name, "`", "")
+    indexStr := "`"
+    if !strings.HasPrefix(s, indexStr) {
+        return false
+    }
+    var fd = Field{}
+    var index int
+    fd.Name, index = fetchWord(s, index)
+    fd.Type, index = fetchWord(s, index)
+    fd.Name = strings.ReplaceAll(fd.Name, "`", "")
 
-	t.Field = append(t.Field, fd)
-	return true
+    // 仅解析 DEFAULT 默认值（CK/SR）
+    for {
+        tok, next := fetchWord(s, index)
+        tokTrim := strings.TrimSpace(tok)
+        if tokTrim == "" {
+            break
+        }
+        upper := strings.ToUpper(tokTrim)
+
+        switch upper {
+        case "DEFAULT":
+            val, next2 := fetchWord(s, next)
+            fd.DefaultKind = "DEFAULT"
+            fd.DefaultExpr = strings.TrimSpace(val)
+            index = next2
+            continue
+        }
+
+        // 推进index到下一个位置
+        index = next
+    }
+
+    t.Field = append(t.Field, fd)
+    return true
 }
 
 
