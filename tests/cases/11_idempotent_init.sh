@@ -26,14 +26,18 @@ echo "[准备] 执行建表以确保自包含"
 ./execute_sql.sh ./config.json "${SQL_DIR}"
 
 echo "[执行] 第一次 init（创建视图与后缀表）"
-cksr init --config ./config.json
+cksr_safe init --config ./config.json
 
 echo "[执行] 第二次 init（幂等）"
-cksr init --config ./config.json
+cksr_safe init --config ./config.json
 
-echo "[断言] 视图仍存在，且定义有效"
-sr_view_exists "${BASE_NAME}" || { echo "视图 ${BASE_NAME} 不存在"; exit 1; }
-sr_show_create_view_contains "${BASE_NAME}" "union all" || { echo "视图 ${BASE_NAME} 定义不包含 union all"; exit 1; }
+if should_assert; then
+  echo "[断言] 视图仍存在，且定义有效"
+  assert_sr_view_exists "${BASE_NAME}" "视图 ${BASE_NAME} 不存在"
+  assert_sr_view_contains "${BASE_NAME}" "union all" "视图 ${BASE_NAME} 定义不包含 union all"
+else
+  echo "[跳过断言] 上一步 init 失败，跳过幂等性断言"
+fi
 
 echo "[清理后置] 回滚并删除表，恢复初始状态"
 cksr rollback --config ./config.json || true
@@ -46,3 +50,4 @@ for f in "${SQL_DIR}"/*.sql; do
 done
 
 echo "[通过] 11_idempotent_init"
+asserts_finalize

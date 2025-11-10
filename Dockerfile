@@ -1,8 +1,13 @@
 # syntax=docker/dockerfile:1.4
 # 使用官方Go镜像作为构建环境
-FROM mirrors.sangfor.com/golang:1.22 AS builder
+FROM mirrors.sangfor.com/golang:1.25 AS builder
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
+
+ENV GO111MODULE=on
+ARG GOPROXY=http://mirrors.sangfor.org/nexus/repository/go-proxy-group
+ENV GOPROXY=${GOPROXY}
+ENV GOSUMDB=off
 
 # 设置工作目录
 WORKDIR /app

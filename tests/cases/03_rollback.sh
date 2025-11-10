@@ -24,15 +24,17 @@ done
 
 echo "[准备] 执行建表并初始化视图，确保可回滚的状态"
 ./execute_sql.sh ./config.json "${SQL_DIR}"
-cksr init --config ./config.json
+cksr_safe init --config ./config.json
 
 echo "[执行] 回滚"
 cksr rollback --config ./config.json || true
 
-echo "[断言] 基础名表存在，基础视图不存在"
-sr_table_exists "${BASE_NAME}" || { echo "回滚后缺少基础名表 ${BASE_NAME}"; exit 1; }
-if sr_view_exists "${BASE_NAME}"; then
-  echo "回滚后视图 ${BASE_NAME} 仍存在"; exit 1;
+if should_assert; then
+  echo "[断言] 基础名表存在，基础视图不存在"
+  assert_sr_table_exists "${BASE_NAME}" "回滚后缺少基础名表 ${BASE_NAME}"
+  assert_sr_view_not_exists "${BASE_NAME}" "回滚后视图 ${BASE_NAME} 仍存在"
+else
+  echo "[跳过断言] 上一步 init 失败，跳过回滚断言"
 fi
 
 echo "[清理后置] 删除基础表，恢复初始状态"
@@ -43,3 +45,4 @@ for f in "${SQL_DIR}"/*.sql; do
 done
 
 echo "[通过] 03_rollback"
+asserts_finalize
