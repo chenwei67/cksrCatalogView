@@ -22,16 +22,103 @@ TEMP_DIR=$(jq -r '.temp_dir' "$CONFIG_FILE")
 if [[ -z "$TEMP_DIR" || "$TEMP_DIR" == "null" ]]; then TEMP_DIR="./temp"; fi
 
 MYSQL_OPTS=("-h${SR_HOST}" "-P${SR_PORT}" "-u${SR_USER}")
-if [[ -n "${SR_PASS}" && "${SR_PASS}" != "null" ]]; then
-  MYSQL_OPTS+=("-p${SR_PASS}")
-fi
+
+# 通过环境变量传递密码，避免 mysql 关于命令行密码的警告噪音
+_mysql_invoke() {
+  if [[ -n "${SR_PASS}" && "${SR_PASS}" != "null" ]]; then
+    MYSQL_PWD="${SR_PASS}" mysql "${MYSQL_OPTS[@]}" -D "$SR_DB" "$@"
+  else
+    mysql "${MYSQL_OPTS[@]}" -D "$SR_DB" "$@"
+  fi
+}
 
 mysql_exec() {
-  mysql "${MYSQL_OPTS[@]}" -D "$SR_DB" -e "$1"
+  _mysql_invoke -e "$1"
+}
+
+mysql_exec_safe() {
+  set +e
+  _mysql_invoke -e "$1" >/dev/null 2>&1
+  local status=$?
+  set -e
+  if [[ $status -ne 0 ]]; then
+    echo "[警告] 已忽略的执行错误：$1"
+  fi
+  return 0
 }
 
 mysql_query() {
-  mysql "${MYSQL_OPTS[@]}" -D "$SR_DB" -s -N -e "$1"
+  _mysql_invoke -s -N -e "$1"
+}
+
+# 为非空列填充占位默认值，尽量避免插入失败
+_sr_placeholder_for_type() {
+  local dtype="${1,,}"
+  case "$dtype" in
+    tinyint|smallint|int|integer|bigint|largeint) echo "0" ;;
+    float|double|real) echo "0" ;;
+    decimal|numeric) echo "0" ;;
+    boolean|bool) echo "0" ;;
+    varchar|char|string) echo "''" ;;
+    json) echo "'{}'" ;;
+    date) echo "'1970-01-01'" ;;
+    datetime|timestamp) echo "'1970-01-01 00:00:00'" ;;
+    *) echo "0" ;;
+  esac
+}
+
+# 插入一行包含最小时间的记录，自动为非空列填充值
+# 用法： sr_insert_min_timestamp_row <table> <ts_col> <ts_typ> <raw_value>
+sr_insert_min_timestamp_row() {
+  local table="$1" ts_col="$2" ts_typ="$3" raw="$4" mode="${5:-${SR_INSERT_MODE:-all}}"
+  # 读取列定义
+  local rows
+  rows=$(mysql_query "SELECT COLUMN_NAME, IS_NULLABLE, DATA_TYPE, COLUMN_DEFAULT FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='${SR_DB}' AND TABLE_NAME='${table}' ORDER BY ORDINAL_POSITION;")
+  local -a cols; local -a vals
+  if [[ -z "$rows" ]]; then
+    echo "错误：无法读取表结构 ${table}" >&2; return 1
+  fi
+  while IFS=$'\t' read -r cname isnull dtype cdef; do
+    # 选择列集合：all 模式填所有列；required_only 只填必填列（NOT NULL 且无 DEFAULT），时间列始终包含
+    if [[ "$mode" == "required_only" && "$cname" != "$ts_col" ]]; then
+      if [[ -n "$cdef" && "$cdef" != "NULL" ]]; then
+        # 有默认值：省略该列
+        continue
+      elif [[ "$isnull" == "YES" ]]; then
+        # 可空：省略该列
+        continue
+      fi
+      # 否则：必填列，需填占位
+    fi
+
+    cols+=("$cname")
+    local v=""
+    if [[ "$cname" == "$ts_col" ]]; then
+      if [[ "$ts_typ" == "datetime" || "$ts_typ" == "date" ]]; then
+        v="'${raw}'"
+      else
+        v="${raw}"
+      fi
+    else
+      if [[ -n "$cdef" && "$cdef" != "NULL" ]]; then
+        v="DEFAULT"
+      elif [[ "$isnull" == "YES" ]]; then
+        v="NULL"
+      else
+        v="$(_sr_placeholder_for_type "$dtype")"
+      fi
+    fi
+    vals+=("$v")
+  done <<< "$rows"
+
+  # 组装并执行 INSERT
+  local i cols_sql="" vals_sql=""
+  for ((i=0; i<${#cols[@]}; i++)); do
+    if [[ $i -gt 0 ]]; then cols_sql+=", "; vals_sql+=", "; fi
+    cols_sql+="\`${cols[$i]}\`"
+    vals_sql+="${vals[$i]}"
+  done
+  mysql_exec "INSERT INTO \`${table}\` (${cols_sql}) VALUES (${vals_sql})"
 }
 
 # 取得 temp/sqls 下首个 SQL 文件的基础名（去掉 .sql）

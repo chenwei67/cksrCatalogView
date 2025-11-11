@@ -56,10 +56,10 @@ echo "  端口: $SR_PORT"
 echo "  用户名: $SR_USERNAME"
 echo "  数据库: $SR_DATABASE"
 
-# 构建mysql连接参数
+# 构建mysql连接参数（不在命令行传递密码以避免警告）
 MYSQL_OPTS="-h$SR_HOST -P$SR_PORT -u$SR_USERNAME"
 if [ "$SR_PASSWORD" != "null" ] && [ "$SR_PASSWORD" != "" ]; then
-    MYSQL_OPTS="$MYSQL_OPTS -p$SR_PASSWORD"
+    export MYSQL_PWD="$SR_PASSWORD"
 fi
 
 # 测试数据库连接

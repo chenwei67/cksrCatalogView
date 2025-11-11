@@ -33,7 +33,13 @@ sr_drop_table_if_exists() {
 # 删除视图（若存在）
 sr_drop_view_if_exists() {
   local name="$1"
-  mysql_exec "DROP VIEW IF EXISTS \`${name}\`"
+  # 安全删除：仅当对象确认为视图时才执行删除，避免对象是表时的 1347 错误
+  if sr_view_exists "${name}"; then
+    mysql_exec "DROP VIEW IF EXISTS \`${name}\`"
+  else
+    # 若对象不存在或是表，则不进行 DROP VIEW
+    return 0
+  fi
 }
 
 # ----------------------

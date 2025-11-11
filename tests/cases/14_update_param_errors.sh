@@ -12,29 +12,26 @@ if [[ -z "${first_sql}" ]]; then
 fi
 BASE_NAME="$(basename "${first_sql}")"; BASE_NAME="${BASE_NAME%.sql}"
 
-echo "[清理前置] 删除可能存在的视图与表，确保干净环境"
+warn "[清理前置] 删除可能存在的视图与表，确保干净环境"
 sr_drop_view_if_exists "${BASE_NAME}" || true
 sr_drop_table_if_exists "${BASE_NAME}${SR_SUFFIX}" || true
 sr_drop_table_if_exists "${BASE_NAME}" || true
 
-echo "[执行A] 缺少必要参数（预期失败）"
+step "执行A 缺少必要参数（预期失败）"
 if cksr update --config ./config.json; then
   echo "预期失败但实际成功：未校验缺少参数"; exit 1;
 else
-  echo "[断言A] 失败符合预期，缺少 --pair 或 --table"
+  info "[断言A] 失败符合预期，缺少 --pair 或 --table"
 fi
 
-echo "[执行B] 分区类型不匹配（为 datetime 列传入未加引号数值，预期失败）"
+step "执行B 分区类型不匹配（为 datetime 列传入未加引号数值，预期失败）"
 if cksr update --config ./config.json --pair "$PAIR_NAME" --table ${BASE_NAME},20250101; then
   echo "预期失败但实际成功：未校验分区类型"; exit 1;
 else
-  echo "[断言B] 失败符合预期，ALTER VIEW 执行报错"
+  info "[断言B] 失败符合预期，ALTER VIEW 执行报错"
 fi
 
-echo "[清理后置] 回滚并删除表，恢复初始状态"
-cksr rollback --config ./config.json || true
-sr_drop_view_if_exists "${BASE_NAME}" || true
-sr_drop_table_if_exists "${BASE_NAME}${SR_SUFFIX}" || true
+:
 sr_drop_table_if_exists "${BASE_NAME}" || true
 
-echo "[通过] 14_update_param_errors（预期失败用例）"
+info "[通过] 14_update_param_errors（预期失败用例）"

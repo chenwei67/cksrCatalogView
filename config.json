@@ -24,7 +24,7 @@
       },
       "starrocks": {
         "host": "10.107.29.99",
-        "port": 30291,
+        "port": 30113,
         "username": "root",
         "password": "StarRocks!@2025#.",
         "database": "business",

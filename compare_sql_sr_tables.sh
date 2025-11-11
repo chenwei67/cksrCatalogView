@@ -55,10 +55,10 @@ fi
 echo "StarRocks 连接: $SR_HOST:$SR_PORT 数据库: $SR_DATABASE 用户: $SR_USERNAME";
 [ -n "$SR_TABLE_SUFFIX" ] && [ "$SR_TABLE_SUFFIX" != "null" ] && echo "过滤后缀: $SR_TABLE_SUFFIX";
 
-# 构造 mysql 参数
+# 构造 mysql 参数（通过环境变量传递密码以避免警告）
 MYSQL_OPTS="-h$SR_HOST -P$SR_PORT -u$SR_USERNAME"
 if [ -n "$SR_PASSWORD" ] && [ "$SR_PASSWORD" != "null" ]; then
-  MYSQL_OPTS="$MYSQL_OPTS -p$SR_PASSWORD"
+  export MYSQL_PWD="$SR_PASSWORD"
 fi
 
 # 测试连接

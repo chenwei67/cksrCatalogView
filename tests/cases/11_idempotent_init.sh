@@ -13,7 +13,7 @@ if [[ -z "${first_sql}" ]]; then
 fi
 BASE_NAME="$(basename "${first_sql}")"; BASE_NAME="${BASE_NAME%.sql}"
 
-echo "[清理前置] 删除可能存在的视图与表，确保干净环境"
+warn "[清理前置] 删除可能存在的视图与表，确保干净环境"
 for f in "${SQL_DIR}"/*.sql; do
   [[ -e "$f" ]] || continue
   name="$(basename "$f")"; base="${name%.sql}"
@@ -22,32 +22,20 @@ for f in "${SQL_DIR}"/*.sql; do
   sr_drop_table_if_exists "${base}" || true
 done
 
-echo "[准备] 执行建表以确保自包含"
+info "[准备] 执行建表以确保自包含"
 ./execute_sql.sh ./config.json "${SQL_DIR}"
 
-echo "[执行] 第一次 init（创建视图与后缀表）"
-cksr_safe init --config ./config.json
+step "执行 第一次 init（创建视图与后缀表）"
+cksr init --config ./config.json
 
-echo "[执行] 第二次 init（幂等）"
-cksr_safe init --config ./config.json
+step "执行 第二次 init（幂等）"
+cksr init --config ./config.json
 
-if should_assert; then
-  echo "[断言] 视图仍存在，且定义有效"
-  assert_sr_view_exists "${BASE_NAME}" "视图 ${BASE_NAME} 不存在"
-  assert_sr_view_contains "${BASE_NAME}" "union all" "视图 ${BASE_NAME} 定义不包含 union all"
-else
-  echo "[跳过断言] 上一步 init 失败，跳过幂等性断言"
-fi
+info "[断言] 视图仍存在，且定义有效"
+assert_sr_view_exists "${BASE_NAME}" "视图 ${BASE_NAME} 不存在"
+assert_sr_view_contains "${BASE_NAME}" "union all" "视图 ${BASE_NAME} 定义不包含 union all"
 
-echo "[清理后置] 回滚并删除表，恢复初始状态"
-cksr rollback --config ./config.json || true
-for f in "${SQL_DIR}"/*.sql; do
-  [[ -e "$f" ]] || continue
-  name="$(basename "$f")"; base="${name%.sql}"
-  sr_drop_view_if_exists "${base}" || true
-  sr_drop_table_if_exists "${base}${SR_SUFFIX}" || true
-  sr_drop_table_if_exists "${base}" || true
-done
+:
 
-echo "[通过] 11_idempotent_init"
+info "[通过] 11_idempotent_init"
 asserts_finalize

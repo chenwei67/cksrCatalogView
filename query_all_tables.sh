@@ -53,10 +53,10 @@ if [ "$SR_TABLE_SUFFIX" != "null" ] && [ "$SR_TABLE_SUFFIX" != "" ]; then
     echo "  表后缀过滤: $SR_TABLE_SUFFIX"
 fi
 
-# 构建mysql连接参数
+# 构建mysql连接参数（通过环境变量传递密码以避免警告）
 MYSQL_OPTS="-h$SR_HOST -P$SR_PORT -u$SR_USERNAME"
 if [ "$SR_PASSWORD" != "null" ] && [ "$SR_PASSWORD" != "" ]; then
-    MYSQL_OPTS="$MYSQL_OPTS -p$SR_PASSWORD"
+    export MYSQL_PWD="$SR_PASSWORD"
 fi
 
 # 测试数据库连接
