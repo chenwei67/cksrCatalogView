@@ -28,4 +28,4 @@ assert_sr_table_exists "${BASE_NAME}" "回滚后缺少基础名表 ${BASE_NAME}"
 assert_sr_view_not_exists "${BASE_NAME}" "回滚后视图 ${BASE_NAME} 仍存在"
 
 
-info "[通过] 03_rollback"
+info "[通过] 04_rollback"

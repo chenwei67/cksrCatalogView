@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 串行执行所有用例，不实际运行时可作为参考入口
+# 串行执行所有用例：自动读取 tests/cases 目录并按文件名排序执行
 
 run_case() {
   local script="$1"
@@ -15,13 +15,16 @@ run_case() {
   fi
 }
 
-run_case tests/cases/01_init_create_view.sh
-run_case tests/cases/03_rollback.sh
-run_case tests/cases/11_idempotent_init.sh
-# run_case tests/cases/02a_update_with_data.sh
-run_case tests/cases/02b_update_without_data.sh
-run_case tests/cases/12_invalid_mapping.sh
-run_case tests/cases/13_rename_conflict.sh
-run_case tests/cases/14_update_param_errors.sh
+CASES_DIR="tests/cases"
+echo "[INFO] 自动发现并执行 ${CASES_DIR} 下的用例脚本"
+found_any=false
+while IFS= read -r script; do
+  found_any=true
+  run_case "$script"
+done < <(find "$CASES_DIR" -maxdepth 1 -type f -name "*.sh" | sort)
 
-echo "[完成] 所有用例脚本已准备好，可在 Linux 环境运行"
+if [[ "$found_any" != true ]]; then
+  echo "[WARN] 未在 ${CASES_DIR} 下发现任何 .sh 用例脚本"
+else
+  echo "[完成] 所有用例脚本已按序执行"
+fi

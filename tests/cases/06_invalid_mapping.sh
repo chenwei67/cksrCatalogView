@@ -9,7 +9,7 @@ source tests/helpers/asserts.sh
 pre_case_cleanup
 
 info "[准备] 在 SR 创建一个包含额外列的表以制造映射不一致"
-./execute_sql.sh ./config.json ./tests/fixtures/invalid_mapping
+tests/helpers/execute_sql.sh ./config.json ./tests/fixtures/invalid_mapping
 
 step "执行 初始化（预期成功）"
 if cksr init --config ./config.json; then
@@ -18,4 +18,4 @@ else
   echo "预期成功但实际失败：映射未通过"; exit 1;
 fi
 
-info "[通过] 12_invalid_mapping（SR-only 列默认占位用例）"
+info "[通过] 06_invalid_mapping（SR-only 列默认占位用例）"

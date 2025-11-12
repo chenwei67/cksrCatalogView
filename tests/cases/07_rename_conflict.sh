@@ -29,4 +29,10 @@ else
   info "[断言] 失败符合预期，包含重命名冲突语义"
 fi
 
-info "[通过] 13_rename_conflict（预期失败用例）"
+info "[通过] 07_rename_conflict（预期失败用例）"
+
+# 目标后置清理：删除本用例人为制造的冲突对象，避免后续用例的前置rollback被阻塞
+step "收尾 删除冲突对象"
+sr_drop_view_if_exists "${BASE_NAME}"
+mysql_exec "DROP TABLE IF EXISTS \`${BASE_NAME}\`"
+mysql_exec "DROP TABLE IF EXISTS \`${BASE_NAME}${SR_SUFFIX}\`"

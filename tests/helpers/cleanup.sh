@@ -41,7 +41,7 @@ ensure_temp_sql_tables() {
   local sql_dir="${1:-${TEMP_DIR}/sqls}"
   if [[ -d "$sql_dir" ]] && ls -1 "$sql_dir"/*.sql >/dev/null 2>&1; then
     step "准备 执行建表：${sql_dir}"
-    ./execute_sql.sh ./config.json "$sql_dir"
+    tests/helpers/execute_sql.sh ./config.json "$sql_dir"
   else
     info "未检测到 ${sql_dir} 下的 .sql 文件，略过建表"
   fi

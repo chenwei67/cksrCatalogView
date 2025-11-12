@@ -44,6 +44,11 @@ for f in "${SQL_DIR}"/*.sql; do
   info "[断言] 视图定义包含分区值（最小值）"
   assert_sr_view_contains "${BASE_NAME}" "${PARTITION}" "视图 ${BASE_NAME} 未包含分区 ${PARTITION}"
 
+  # 加强断言：基础表与视图均应有数据，视图可查询
+  assert_sr_base_has_rows "${BASE_NAME}" "基础表 ${target_table} 无数据"
+  assert_sr_view_select_ok "${BASE_NAME}" "视图 ${BASE_NAME} 查询失败"
+  assert_sr_view_row_count_ge "${BASE_NAME}" 1 "视图 ${BASE_NAME} 行数应至少为 1"
+
   # 清理插入的数据（非致命）
   sr_cleanup_test_rows "${target_table}" "$col" "$RAW_PARTITION_VALUE" "$typ"
 done
@@ -51,4 +56,4 @@ if [[ "$found_any" != true ]]; then
   echo "错误：目录 ${SQL_DIR} 下未找到 .sql 文件"; exit 1;
 fi
 
-info "[通过] 02a_update_with_data"
+info "[通过] 02_update_with_data"

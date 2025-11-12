@@ -36,4 +36,4 @@ if [[ "$found_any" != true ]]; then
   echo "错误：目录 ${SQL_DIR} 下未找到 .sql 文件"; exit 1;
 fi
 
-info "[通过] 02b_update_without_data"
+info "[通过] 03_update_without_data"

@@ -226,12 +226,33 @@ sr_is_dynamic_partitioned() {
 sr_ensure_today_partition() {
   local table="$1" ts_typ="$2"
   local part_name; part_name="p$(date +'%Y%m%d')"
-  # 动态分区表不允许手动 ADD/DROP；跳过并提示
+  # 动态分区表：通过调整动态分区属性，确保创建今日分区
   if sr_is_dynamic_partitioned "$table"; then
-    echo "提示：\`${table}\` 为动态分区表，跳过手动添加分区 \`${part_name}\`。请通过调整 dynamic_partition.start/end/create_history_partition 覆盖所需日期。" >&2
+    # 若分区已存在则跳过
+    if sr_partition_exists "$table" "$part_name"; then
+      return 0
+    fi
+    step "动态分区 启用并覆盖范围到今天：${table}"
+    # 通用设置：启用动态分区，按日粒度；覆盖到今天与明天，并开启历史分区创建
+    # 注意：不同版本的 StarRocks 支持的属性键可能有差异；这里采用通用键名
+    mysql_exec "ALTER TABLE \`${table}\` SET (\"dynamic_partition.enable\" = \"true\", \"dynamic_partition.time_unit\" = \"DAY\", \"dynamic_partition.start\" = \"-1\", \"dynamic_partition.end\" = \"2\", \"dynamic_partition.create_history_partition\" = \"true\")"
+    # 轮询等待分区创建完成
+    if sr_wait_for_today_partition "$table" "$ts_typ" 90; then
+      return 0
+    fi
+    # 若仍未创建，临时关闭动态分区并手动补全天分区，然后恢复动态分区
+    warn "动态分区未及时创建，尝试手动补全天分区并恢复动态设置：${table}"
+    mysql_exec "ALTER TABLE \`${table}\` SET (\"dynamic_partition.enable\" = \"false\")"
+    # 手动补全分区：动态分区通常以 DATETIME 类型分区（from_unixtime），统一采用字符串上界
+    local upper_dt="$(date -d 'tomorrow' +'%Y-%m-%d') 00:00:00"
+    mysql_exec "ALTER TABLE \`${table}\` ADD PARTITION \`${part_name}\` VALUES LESS THAN ('${upper_dt}')"
+    # 恢复动态分区设置
+    mysql_exec "ALTER TABLE \`${table}\` SET (\"dynamic_partition.enable\" = \"true\", \"dynamic_partition.time_unit\" = \"DAY\", \"dynamic_partition.start\" = \"-1\", \"dynamic_partition.end\" = \"7\", \"dynamic_partition.create_history_partition\" = \"true\")"
+    # 最后再次确认分区存在
+    sr_wait_for_today_partition "$table" "$ts_typ" 30
     return 0
   fi
-  # 已存在则直接跳过，避免重复创建报错
+  # 非动态分区表：手动添加分区（避免重复创建）
   if sr_partition_exists "$table" "$part_name"; then
     return 0
   fi
@@ -248,7 +269,29 @@ sr_ensure_today_partition() {
   fi
 }
 
+# 等待今日分区存在（支持动态分区表）：轮询直到分区存在或超时
+# 用法： sr_wait_for_today_partition <table> <ts_typ> [timeout_seconds]
+sr_wait_for_today_partition() {
+  local table="$1" ts_typ="$2" timeout="${3:-60}"
+  local part_name; part_name="p$(date +'%Y%m%d')"
+  local start_ts=$(date +%s)
+  step "等待分区 ${part_name} 可用：${table}"
+  while true; do
+    if sr_partition_exists "$table" "$part_name"; then
+      info "分区 ${part_name} 已可用"
+      return 0
+    fi
+    local now=$(date +%s)
+    if (( now - start_ts >= timeout )); then
+      echo "错误：等待分区 ${part_name} 超时(${timeout}s)，请检查动态分区配置" >&2
+      return 1
+    fi
+    sleep 2
+  done
+}
+
 export -f sr_ensure_today_partition
+export -f sr_wait_for_today_partition
 export -f sr_partition_exists
 sr_has_rows() {
   local view="$1"

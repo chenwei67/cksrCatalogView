@@ -196,36 +196,37 @@ func (im *InitManager) processTable(plan TableInitPlan, ckSchemaMap map[string]s
     if err != nil {
         return fmt.Errorf("创建字段转换器失败(表 %s): %w", plan.BaseTable, err)
     }
-    alterBuilder := builder.NewCKAddColumnsBuilder(fieldConverters, ckTable.DDL.DBName, ckTable.DDL.TableName)
-    alterSQL := alterBuilder.Build()
-    if strings.TrimSpace(alterSQL) != "" {
-        ckDB, errConn := im.dbManager.GetClickHouseConnection()
-        if errConn != nil {
-            return fmt.Errorf("获取ClickHouse连接失败: %w", errConn)
-        }
-        if err = im.dbManager.ExecuteBatchSQLWithDB(ckDB, []string{alterSQL}, true); err != nil {
-            return fmt.Errorf("执行ClickHouse ALTER TABLE失败(表 %s): %w", plan.BaseTable, err)
-        }
-    }
 
-    // 如需重命名 SR 原生表：基础名 -> 后缀名
-    actualSRTable := plan.BaseTable
+    // 确定 SR 实际表名：
+    // - 若需要重命名：基础名 -> 后缀名
+    // - 若无需重命名（仅创建视图，SR侧已存在后缀表）：使用后缀表名
     if plan.NeedRename {
-        actualSRTable = plan.BaseTable + im.pair.SRTableSuffix
-        renameSQL := fmt.Sprintf("ALTER TABLE `%s`.`%s` RENAME `%s`", im.pair.StarRocks.Database, plan.BaseTable, actualSRTable)
-        if err = im.dbManager.ExecuteStarRocksSQL(renameSQL); err != nil {
-            return fmt.Errorf("执行StarRocks重命名失败(%s -> %s): %w", plan.BaseTable, actualSRTable, err)
+        alterBuilder := builder.NewCKAddColumnsBuilder(fieldConverters, ckTable.DDL.DBName, ckTable.DDL.TableName)
+        alterSQL := alterBuilder.Build()
+        if strings.TrimSpace(alterSQL) != "" {
+            ckDB, errConn := im.dbManager.GetClickHouseConnection()
+            if errConn != nil {
+                return fmt.Errorf("获取ClickHouse连接失败: %w", errConn)
+            }
+            if err = im.dbManager.ExecuteBatchSQLWithDB(ckDB, []string{alterSQL}, true); err != nil {
+                return fmt.Errorf("执行ClickHouse ALTER TABLE失败(表 %s): %w", plan.BaseTable, err)
+            }
         }
-    }
+
+        renameSQL := fmt.Sprintf("ALTER TABLE `%s`.`%s` RENAME `%s`", im.pair.StarRocks.Database, plan.BaseTable, plan.SuffixedTable)
+        if err = im.dbManager.ExecuteStarRocksSQL(renameSQL); err != nil {
+            return fmt.Errorf("执行StarRocks重命名失败(%s -> %s): %w", plan.BaseTable, plan.SuffixedTable, err)
+        }
+    } 
 
     // 获取并解析 SR DDL（可能是重命名后的表名）
-    srDDL, err := im.dbManager.GetStarRocksTableDDL(actualSRTable)
+    srDDL, err := im.dbManager.GetStarRocksTableDDL(plan.SuffixedTable)
     if err != nil {
-        return fmt.Errorf("获取StarRocks表DDL失败(%s): %w", actualSRTable, err)
+        return fmt.Errorf("获取StarRocks表DDL失败(%s): %w", plan.SuffixedTable, err)
     }
-    srTable, err := common.ParseTableFromString(srDDL, im.pair.StarRocks.Database, actualSRTable, im.cfg)
+    srTable, err := common.ParseTableFromString(srDDL, im.pair.StarRocks.Database, plan.SuffixedTable, im.cfg)
     if err != nil {
-        return fmt.Errorf("解析StarRocks表失败(%s): %w", actualSRTable, err)
+        return fmt.Errorf("解析StarRocks表失败(%s): %w", plan.SuffixedTable, err)
     }
 
     // 生成并执行视图 SQL

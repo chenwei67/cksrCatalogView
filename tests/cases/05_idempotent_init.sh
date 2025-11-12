@@ -26,5 +26,10 @@ info "[断言] 视图仍存在，且定义有效"
 assert_sr_view_exists "${BASE_NAME}" "视图 ${BASE_NAME} 不存在"
 assert_sr_view_contains "${BASE_NAME}" "union all" "视图 ${BASE_NAME} 定义不包含 union all"
 
+# 加强断言：验证关键列存在，并确认视图可查询
+spec="$(detect_timestamp_column_for "${BASE_NAME}")"; col="${spec%%|*}"; typ="${spec##*|}"
+assert_sr_describe_contains "${BASE_NAME}" "${col}" "视图 ${BASE_NAME} 不包含时间列 ${col}"
+assert_sr_view_select_ok "${BASE_NAME}" "视图 ${BASE_NAME} 查询失败"
 
-info "[通过] 11_idempotent_init"
+
+info "[通过] 05_idempotent_init"

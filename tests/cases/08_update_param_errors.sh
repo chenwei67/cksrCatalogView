@@ -25,18 +25,20 @@ else
 fi
 
 step "执行A 缺少必要参数（预期失败）"
-if cksr update --config ./config.json; then
-  echo "预期失败但实际成功：未校验缺少参数"; exit 1;
+outA=$(cksr update --config ./config.json 2>&1 || true)
+if echo "$outA" | grep -Fq "CONFIG_ERROR: 必须提供 --pair"; then
+  info "[断言A] 错误信息包含: CONFIG_ERROR: 必须提供 --pair"
 else
-  info "[断言A] 失败符合预期，缺少 --pair 或 --table"
+  echo "预期失败且包含缺少 --pair，但输出不符：$outA"; exit 1;
 fi
 
 step "执行B 分区类型不匹配（为 datetime 列传入未加引号数值，预期失败）"
-if cksr update --config ./config.json --pair "$PAIR_NAME" --table "${BASE_NAME}" --partition 20250101; then
-  echo "预期失败但实际成功：未校验分区类型"; exit 1;
+outB=$(cksr update --config ./config.json --pair "$PAIR_NAME" --table "${BASE_NAME}" --partition 20250101 2>&1 || true)
+if echo "$outB" | grep -Eiq "执行ALTER VIEW语句失败|构建ALTER VIEW SQL失败"; then
+  info "[断言B] 错误信息包含 ALTER VIEW 失败"
 else
-  info "[断言B] 失败符合预期，ALTER VIEW 执行报错"
+  echo "预期失败但实际输出不包含预期错误信息：$outB"; exit 1;
 fi
 
 :
-info "[通过] 14_update_param_errors（预期失败用例）"
+info "[通过] 08_update_param_errors（预期失败用例）"
