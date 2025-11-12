@@ -36,17 +36,6 @@ mysql_exec() {
   _mysql_invoke -e "$1"
 }
 
-mysql_exec_safe() {
-  set +e
-  _mysql_invoke -e "$1" >/dev/null 2>&1
-  local status=$?
-  set -e
-  if [[ $status -ne 0 ]]; then
-    echo "[警告] 已忽略的执行错误：$1"
-  fi
-  return 0
-}
-
 mysql_query() {
   _mysql_invoke -s -N -e "$1"
 }
@@ -198,6 +187,69 @@ suggest_partition_for_view() {
 }
 
 # 查询表是否有数据
+
+# 为 SR 表创建当天零点所在的日分区（上界为次日零点）
+# 用法： sr_ensure_today_partition <table> <ts_typ>
+# - ts_typ: datetime | date | bigint/timestamp
+sr_partition_exists() {
+  local table="$1" part="$2"
+  local ddl rows
+  # 优先解析 SHOW CREATE TABLE 的 DDL，精确匹配分区名
+  ddl=$(mysql_query "SHOW CREATE TABLE \`${SR_DB}\`.\`${table}\`" || true)
+  if echo "$ddl" | grep -E "PARTITION[[:space:]]+\`$part\`" >/dev/null; then
+    return 0
+  fi
+  # 回退：直接在 SHOW PARTITIONS 输出中查找分区名（不依赖列序）
+  rows=$(mysql_query "SHOW PARTITIONS FROM \`${SR_DB}\`.\`${table}\`" || true)
+  if echo "$rows" | grep -Fq "$part"; then
+    return 0
+  fi
+  return 1
+}
+
+# 检查是否为动态分区表
+sr_is_dynamic_partitioned() {
+  local table="$1"
+  local ddl
+  ddl=$(mysql_query "SHOW CREATE TABLE \`${SR_DB}\`.\`${table}\`" || true)
+  # 兼容大小写和单双引号
+  if echo "$ddl" | grep -E '"dynamic_partition.enable"\s*=\s*"?true"?' >/dev/null; then
+    return 0
+  fi
+  if echo "$ddl" | grep -Ei "DYNAMIC_PARTITION" >/dev/null; then
+    # 某些版本以注释块或不同序列化方式呈现，包含 DYNAMIC_PARTITION 即认为开启
+    return 0
+  fi
+  return 1
+}
+
+sr_ensure_today_partition() {
+  local table="$1" ts_typ="$2"
+  local part_name; part_name="p$(date +'%Y%m%d')"
+  # 动态分区表不允许手动 ADD/DROP；跳过并提示
+  if sr_is_dynamic_partitioned "$table"; then
+    echo "提示：\`${table}\` 为动态分区表，跳过手动添加分区 \`${part_name}\`。请通过调整 dynamic_partition.start/end/create_history_partition 覆盖所需日期。" >&2
+    return 0
+  fi
+  # 已存在则直接跳过，避免重复创建报错
+  if sr_partition_exists "$table" "$part_name"; then
+    return 0
+  fi
+  if [[ "$ts_typ" == "datetime" ]]; then
+    local upper="$(date -d 'tomorrow' +'%Y-%m-%d') 00:00:00"
+    mysql_exec "ALTER TABLE \`${table}\` ADD PARTITION \`${part_name}\` VALUES LESS THAN ('${upper}')"
+  elif [[ "$ts_typ" == "date" ]]; then
+    local upper="$(date -d 'tomorrow' +'%Y-%m-%d')"
+    mysql_exec "ALTER TABLE \`${table}\` ADD PARTITION \`${part_name}\` VALUES LESS THAN ('${upper}')"
+  else
+    local upper_dt="$(date -d 'tomorrow' +'%Y-%m-%d') 00:00:00"
+    local upper_epoch; upper_epoch=$(epoch_of_datetime "${upper_dt}")
+    mysql_exec "ALTER TABLE \`${table}\` ADD PARTITION \`${part_name}\` VALUES LESS THAN (${upper_epoch})"
+  fi
+}
+
+export -f sr_ensure_today_partition
+export -f sr_partition_exists
 sr_has_rows() {
   local view="$1"
   local target="${view}${SR_SUFFIX}"

@@ -4,12 +4,9 @@ set -euo pipefail
 # 用例：字段映射/类型不匹配导致失败（不修改 temp/sqls，使用自己的 fixtures）
 source tests/helpers/config.sh ./config.json
 source tests/helpers/cksr.sh
+source tests/helpers/cleanup.sh
 source tests/helpers/asserts.sh
-
-warn "[清理前置] 删除可能存在的视图与表，确保干净环境"
-sr_drop_view_if_exists "dns_log" || true
-sr_drop_table_if_exists "dns_log${SR_SUFFIX}" || true
-sr_drop_table_if_exists "dns_log" || true
+pre_case_cleanup
 
 info "[准备] 在 SR 创建一个包含额外列的表以制造映射不一致"
 ./execute_sql.sh ./config.json ./tests/fixtures/invalid_mapping
@@ -20,7 +17,5 @@ if cksr init --config ./config.json; then
 else
   echo "预期成功但实际失败：映射未通过"; exit 1;
 fi
-
-:
 
 info "[通过] 12_invalid_mapping（SR-only 列默认占位用例）"

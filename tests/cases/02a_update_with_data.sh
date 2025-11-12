@@ -5,19 +5,12 @@ set -euo pipefail
 source tests/helpers/config.sh ./config.json
 source tests/helpers/asserts.sh
 source tests/helpers/cksr.sh
+source tests/helpers/cleanup.sh
 
 SQL_DIR="${TEMP_DIR}/sqls"
-warn "[清理前置] 删除可能存在的视图与表，确保干净环境"
-for f in "${SQL_DIR}"/*.sql; do
-  [[ -e "$f" ]] || continue
-  name="$(basename "$f")"; base="${name%.sql}"
-  sr_drop_view_if_exists "${base}" || true
-  sr_drop_table_if_exists "${base}${SR_SUFFIX}" || true
-  sr_drop_table_if_exists "${base}" || true
-done
-
-# 准备：执行建表并初始化视图
-./execute_sql.sh ./config.json "${SQL_DIR}"
+pre_case_cleanup
+ensure_temp_sql_tables "${SQL_DIR}"
+# 准备：初始化视图
 step "执行 初始化"
 cksr init --config ./config.json
 
@@ -28,6 +21,9 @@ for f in "${SQL_DIR}"/*.sql; do
   BASE_NAME="$(basename "$f")"; BASE_NAME="${BASE_NAME%.sql}"
   spec="$(detect_timestamp_column_for "${BASE_NAME}")"; col="${spec%%|*}"; typ="${spec##*|}"
   target_table="${BASE_NAME}${SR_SUFFIX}"
+    # 先确保创建当天零点所在分区，避免插入 out-of-range
+    step "准备 创建当天分区：${target_table}"
+    sr_ensure_today_partition "${target_table}" "${typ}"
     # 插入一行早期时间数据，自动填充非空列，确保最小值可被推断（致命失败）
     # 选用当天 00:00:00，避免落入分区范围外
     if [[ "$typ" == "datetime" ]]; then
@@ -43,7 +39,7 @@ for f in "${SQL_DIR}"/*.sql; do
   RAW_PARTITION_VALUE="${info%%|*}"; rest="${info#*|}"; typ2="${rest%%|*}"; col2="${rest#*|}"
   PARTITION="$(format_partition_for_view "${BASE_NAME}" "${RAW_PARTITION_VALUE}")"
   step "执行 有数据更新 ${BASE_NAME}，分区 ${PARTITION}（最小值）"
-  cksr update --config ./config.json --pair "$PAIR_NAME" --table ${BASE_NAME},${PARTITION}
+  cksr update --config ./config.json --pair "$PAIR_NAME" --table "${BASE_NAME}" --partition "${PARTITION}"
 
   info "[断言] 视图定义包含分区值（最小值）"
   assert_sr_view_contains "${BASE_NAME}" "${PARTITION}" "视图 ${BASE_NAME} 未包含分区 ${PARTITION}"
@@ -55,7 +51,4 @@ if [[ "$found_any" != true ]]; then
   echo "错误：目录 ${SQL_DIR} 下未找到 .sql 文件"; exit 1;
 fi
 
-:
-
 info "[通过] 02a_update_with_data"
-asserts_finalize

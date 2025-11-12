@@ -43,14 +43,12 @@ sr_drop_view_if_exists() {
 }
 
 # ----------------------
-# 安全断言（失败不退出，仅记录）
+# 严格断言：失败立即退出
 # ----------------------
-ASSERT_FAIL_COUNT=${ASSERT_FAIL_COUNT:-0}
-
 _assert_fail() {
   local msg="$1"
-  echo "[断言失败] ${msg}"
-  ASSERT_FAIL_COUNT=$((ASSERT_FAIL_COUNT + 1))
+  echo "[断言失败] ${msg}" >&2
+  exit 1
 }
 
 # 表存在断言
@@ -104,16 +102,7 @@ export -f assert_sr_view_exists
 export -f assert_sr_view_not_exists
 export -f assert_sr_view_contains
 
-# 断言收尾：若存在断言失败，则返回非零退出码
-asserts_finalize() {
-  local count="${ASSERT_FAIL_COUNT:-0}"
-  if [[ "$count" -gt 0 ]]; then
-    echo "[断言汇总] 失败次数: ${count}"
-    return 1
-  else
-    echo "[断言汇总] 全部通过"
-    return 0
-  fi
-}
+# 断言收尾（兼容占位）：严格模式下无需汇总，空操作即可
+asserts_finalize() { return 0; }
 
 export -f asserts_finalize

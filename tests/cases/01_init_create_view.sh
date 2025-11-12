@@ -4,19 +4,12 @@ set -euo pipefail
 # 用例：初始化创建视图（SR基础名是原生表）
 source tests/helpers/config.sh ./config.json
 source tests/helpers/cksr.sh
+source tests/helpers/cleanup.sh
 source tests/helpers/asserts.sh
 
-SQL_DIR="./temp/sqls"
-echo "[清理前置] 删除可能存在的视图与表，确保干净环境"
-for f in "${SQL_DIR}"/*.sql; do
-  [[ -e "$f" ]] || continue
-  name="$(basename "$f")"; base="${name%.sql}"
-  sr_drop_view_if_exists "${base}" || true
-  sr_drop_table_if_exists "${base}${SR_SUFFIX}" || true
-  sr_drop_table_if_exists "${base}" || true
-done
-echo "[准备] 执行你提供的 SR 建表 SQL（目录：${SQL_DIR}）"
-./execute_sql.sh ./config.json "${SQL_DIR}"
+SQL_DIR="${TEMP_DIR}/sqls"
+pre_case_cleanup
+ensure_temp_sql_tables "${SQL_DIR}"
 
 echo "[执行] 初始化创建视图"
 step "执行 初始化创建视图"
@@ -37,8 +30,4 @@ if [[ "$found_any" != true ]]; then
   echo "错误：目录 ${SQL_DIR} 下未找到 .sql 文件，无法派生断言对象名"; exit 1;
 fi
 
-echo "[清理后置] 回滚并删除表，恢复初始状态"
-:
-
 echo "[通过] 01_init_create_view"
-asserts_finalize

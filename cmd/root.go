@@ -19,8 +19,6 @@ func NewRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:           "cksr",
 		Short:         "StarRocks ClickHouse catalog视图构建工具",
-		SilenceUsage:  true,
-		SilenceErrors: true,
 	}
 
 	// 持久化参数（所有子命令可用）

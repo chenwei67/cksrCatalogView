@@ -4,4 +4,9 @@ CREATE TABLE IF NOT EXISTS business.dns_log (
   id INT,
   recordTimestamp BIGINT,
   extra_col INT
+) ENGINE=OLAP
+DUPLICATE KEY(id)
+DISTRIBUTED BY HASH(id) BUCKETS 1
+PROPERTIES (
+    "replication_num" = "1"
 );

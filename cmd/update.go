@@ -2,7 +2,6 @@ package cmd
 
 import (
     "errors"
-    "regexp"
     "strings"
 
     "cksr/database"
@@ -16,6 +15,7 @@ import (
 func NewUpdateCmd() *cobra.Command {
     var pairName string
     var tableArgs []string
+    var partitionArgs []string
 
 	cmd := &cobra.Command{
 		Use:   "update",
@@ -35,30 +35,25 @@ func NewUpdateCmd() *cobra.Command {
 				return WrapConfigErr(errors.New("必须提供 --pair"))
 			}
 
-            // 解析 --table 参数，每项格式: <view_name>,<partition_value>
-            if len(tableArgs) == 0 {
-                return WrapConfigErr(errors.New("必须通过 --table 提供至少一个视图与分区"))
+            // 新参数设计：支持多组 --table <view> 与 --partition <value> 成对传入
+            if len(tableArgs) == 0 || len(partitionArgs) == 0 {
+                return WrapConfigErr(errors.New("必须通过 --table 与 --partition 成对提供至少一个视图"))
+            }
+            if len(tableArgs) != len(partitionArgs) {
+                return WrapConfigErr(errors.New("--table 与 --partition 数量不一致"))
             }
 
             var targets []updaterun.UpdateTarget
-            for _, arg := range tableArgs {
-                // 仅按第一个逗号拆分，避免分区值包含逗号或空格时误拆
-                idx := strings.Index(arg, ",")
-                if idx <= 0 || idx >= len(arg)-1 {
-                    return WrapConfigErr(errors.New("--table 参数格式错误，需为 <view>,<partition>"))
-                }
-                view := strings.TrimSpace(arg[:idx])
-                part := strings.TrimSpace(arg[idx+1:])
+            for i := range tableArgs {
+                view := strings.TrimSpace(tableArgs[i])
+                part := strings.TrimSpace(partitionArgs[i])
                 if view == "" || part == "" {
-                    return WrapConfigErr(errors.New("--table 参数包含空视图或空分区值"))
+                    return WrapConfigErr(errors.New("存在空的视图名或分区值"))
                 }
-                // 判断是否数值（整型）
-                isNumeric := regexp.MustCompile(`^-?\d+$`).MatchString(part)
                 targets = append(targets, updaterun.UpdateTarget{
                     ViewName:     view,
                     Partition:    part,
                     HasPartition: true,
-                    IsNumeric:    isNumeric,
                 })
             }
 
@@ -68,7 +63,8 @@ func NewUpdateCmd() *cobra.Command {
     }
 
 	cmd.Flags().StringVar(&pairName, "pair", "", "数据库对名称")
-    cmd.Flags().StringArrayVar(&tableArgs, "table", nil, "目标项，格式为 <view>,<partition>，可重复传入")
+    cmd.Flags().StringArrayVar(&tableArgs, "table", nil, "目标视图名，可重复传入，与 --partition 成对")
+    cmd.Flags().StringArrayVar(&partitionArgs, "partition", nil, "分区值，可重复传入，与 --table 成对")
 
-	return cmd
+    return cmd
 }

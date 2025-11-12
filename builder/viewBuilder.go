@@ -4,7 +4,9 @@ import (
     "database/sql"
     "fmt"
     "maps"
+    "strconv"
     "strings"
+    "time"
 
 	"cksr/config"
 	"cksr/logger"
@@ -390,8 +392,8 @@ func (v *ViewBuilder) BuildAlter() (string, error) {
 // BuildAlterWithPartition 使用提供的分区时间值生成 ALTER VIEW SQL
 // partitionValue: 原始字符串形式的时间值
 // isNumeric: 为true则按数值直接使用；为false则按字符串加引号
-func (v *ViewBuilder) BuildAlterWithPartition(partitionValue string, isNumeric bool) (string, error) {
-    logger.Debug("开始构建带分区值的ALTER VIEW，值: %s，isNumeric=%v", partitionValue, isNumeric)
+func (v *ViewBuilder) BuildAlterWithPartition(partitionValue string) (string, error) {
+    logger.Debug("开始构建带分区值的ALTER VIEW，值: %s", partitionValue)
     // 强制执行完整的字段映射与校验逻辑，保持与 BuildWithType 一致
     if err := v.PrepareAndValidate(); err != nil {
         return "", err
@@ -403,15 +405,35 @@ func (v *ViewBuilder) BuildAlterWithPartition(partitionValue string, isNumeric b
     logger.Debug("生成的ClickHouse查询SQL:\n%s", ckQ)
     logger.Debug("生成的StarRocks查询SQL:\n%s", srQ)
 
-    // 获取时间戳列名
+    // 获取时间戳列信息
     timestampColumn := v.getTimestampColumnName(v.sr.Name)
+    timestampType := strings.ToLower(v.getTimestampColumnType(v.sr.Name))
 
-    // 处理分区值的格式
-    minTimestamp := partitionValue
-    if !isNumeric {
-        if !strings.HasPrefix(minTimestamp, "'") {
-            minTimestamp = "'" + minTimestamp + "'"
+    // 严格校验并规范化分区值：
+    // - datetime/date 类型：必须为可解析的时间字符串（不接受纯数字）；最终以单引号包裹
+    // - bigint 类型：必须为纯数字；直接使用数值
+    // 规范化原始输入
+    trimmed := strings.Trim(partitionValue, "'")
+
+    var minTimestamp string
+    switch timestampType {
+    case "datetime":
+        if _, err := time.Parse("2006-01-02 15:04:05", trimmed); err != nil {
+            return "", fmt.Errorf("分区值解析失败：%v（期望格式 YYYY-MM-DD HH:MM:SS）", err)
         }
+        minTimestamp = "'" + trimmed + "'"
+    case "date":
+        if _, err := time.Parse("2006-01-02", trimmed); err != nil {
+            return "", fmt.Errorf("分区值解析失败：%v（期望格式 YYYY-MM-DD）", err)
+        }
+        minTimestamp = "'" + trimmed + "'"
+    case "bigint":
+        if _, err := strconv.ParseInt(trimmed, 10, 64); err != nil {
+            return "", fmt.Errorf("分区值类型不匹配：列类型为 bigint，分区值必须为纯数字")
+        }
+        minTimestamp = trimmed
+    default:
+        return "", fmt.Errorf("不支持的时间戳列类型：%s，仅支持 date、datetime、bigint", timestampType)
     }
 
     sql := v.ComposeFinalSQL(SQLTypeAlter, ckQ, srQ, timestampColumn, minTimestamp)

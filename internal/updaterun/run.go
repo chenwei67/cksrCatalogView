@@ -21,7 +21,6 @@ type UpdateTarget struct {
     ViewName      string
     Partition     string
     HasPartition  bool
-    IsNumeric     bool
 }
 
 // RunOnceForTargets 一次性更新：按数据库对与视图名+分区值列表更新对应视图
@@ -82,7 +81,7 @@ func RunOnceForTargets(cfg *config.Config, pairName string, targets []UpdateTarg
         if !t.HasPartition {
             return fmt.Errorf("视图 %s 缺少分区时间值", viewName)
         }
-        if err := UpdateSingleView(cfg, srDB, chDB, dbManager, pair, viewName, t.Partition, t.HasPartition, t.IsNumeric); err != nil {
+        if err := UpdateSingleView(cfg, srDB, chDB, dbManager, pair, viewName, t.Partition, t.HasPartition); err != nil {
             logger.Error("更新视图 %s 失败: %v", viewName, err)
             return err
         }
@@ -93,7 +92,7 @@ func RunOnceForTargets(cfg *config.Config, pairName string, targets []UpdateTarg
 }
 
 // UpdateSingleView 通用更新单个视图的逻辑，可选传入分区时间值
-func UpdateSingleView(cfg *config.Config, srDB, chDB *sql.DB, dbManager *database.DatabasePairManager, pair config.DatabasePair, viewName string, partitionValue string, hasPartition bool, isNumeric bool) error {
+func UpdateSingleView(cfg *config.Config, srDB, chDB *sql.DB, dbManager *database.DatabasePairManager, pair config.DatabasePair, viewName string, partitionValue string, hasPartition bool) error {
     // 一次性更新必须显式提供分区值，不允许走自动推断逻辑
     if !hasPartition {
         return fmt.Errorf("一次性更新缺少分区时间值")
@@ -154,7 +153,7 @@ func UpdateSingleView(cfg *config.Config, srDB, chDB *sql.DB, dbManager *databas
         cfg,
     )
 
-    alterViewSQL, err := viewBuilder.BuildAlterWithPartition(partitionValue, isNumeric)
+    alterViewSQL, err := viewBuilder.BuildAlterWithPartition(partitionValue)
     if err != nil {
         return fmt.Errorf("构建ALTER VIEW SQL失败: %w", err)
     }
