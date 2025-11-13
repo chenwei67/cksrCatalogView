@@ -82,7 +82,7 @@ CKSR 用于在 StarRocks 中构建与维护统一视图，将本地冷热数据�
 
 
 ## 安装与构建
-- 环境要求：`Go >= 1.25`、`Docker`（用于导出 linux/amd64 二进制）、`mysql` 客户端、`jq`。
+- 环境要求：`Go >= 1.25`
 - 通过 Docker 导出二进制（推荐）：
   - `make export`（生成 `dist/linux-amd64/cksr`）
   - 可结合 `make run-case CASE=tests/cases/02a_update_with_data.sh` 或 `make test`
