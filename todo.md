@@ -13,7 +13,7 @@
 12. 要支持sr中的新字段和类型`rowLogAlias` varchar(65533) NULL AS ...，注意后续内容我省略了。关键是要确定parser是否支持解析这个字段，以及是否需要对这个字段做特殊处理。
 ~~13. 分析builder包是否合理，是否应该将其rollbackBuilder拆分出来移动到internal\rollbackrun,而其他的文件和目录作为一个整体移动到internal?分析重构成本高不高~~
 13. 生成当前项目完整、全面，详细和准确的readme.md
-
+14. 重构，将builder\ckAddColumnBuilder.go，builder\ckFieldConverter.go，logger（通过抽象出interface层，内部实现替换成slog，并附件文件滚动lumberjack.Logger），以及internal\common\common.go的ParseTableFromString函数（修改第三个参数为超时时间，不再传整个config对象），parser库都抽取出来，因为这些都和ck相关，目的是让ck的解析和字段映射，构建alter table语句的能力单独暴露出来。此库不能依赖当前项目的代码，只能依赖标准库或第三方库。要求对ipv6等特殊类型的列处理抽象为策略模式。新增工厂模式，除了支持当前已有的“视图”模式，还要新增一种“同步”模式，不同模式的各类型策略不同，在工厂创建对象式注册各类型模式。抽取到一个新的go项目中，并通过go.work模式引入到cksr中
 
 
 # 要求
