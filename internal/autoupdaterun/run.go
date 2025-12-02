@@ -25,8 +25,8 @@ import (
 	"cksr/internal/updaterun"
 	"cksr/lock"
 	"cksr/logger"
-	"cksr/retry"
 
+	"example.com/migrationLib/retry"
 	"github.com/robfig/cron/v3"
 )
 
@@ -208,7 +208,11 @@ func (vu *ViewUpdater) updateViewsForPair(dbManager *database.DatabasePairManage
 func (vu *ViewUpdater) getAllViews(srDB *sql.DB, database string) ([]string, error) {
 	query := fmt.Sprintf("SELECT TABLE_NAME FROM information_schema.VIEWS WHERE TABLE_SCHEMA = '%s'", database)
 
-	rows, err := retry.QueryWithRetryDefault(srDB, vu.config, query)
+	retryConfig := retry.Config{
+		MaxRetries: vu.config.Retry.MaxRetries,
+		Delay:      time.Duration(vu.config.Retry.DelayMs) * time.Millisecond,
+	}
+	rows, err := retry.QueryWithRetry(srDB, retryConfig, query)
 	if err != nil {
 		return nil, fmt.Errorf("查询视图失败: %w", err)
 	}
@@ -259,10 +263,16 @@ func (vu *ViewUpdater) UpdateSingleView(srDB, chDB *sql.DB, dbManager *database.
 	// 查询最小时间戳
 	minQuery := fmt.Sprintf("select min(%s) from %s.%s", tsCol, pair.StarRocks.Database, srTableName)
 	var partStr string
+
+	retryConfig := retry.Config{
+		MaxRetries: vu.config.Retry.MaxRetries,
+		Delay:      time.Duration(vu.config.Retry.DelayMs) * time.Millisecond,
+	}
+
 	switch strings.ToLower(tsType) {
 	case "datetime", "date":
 		var nullable *string
-		if err := retry.QueryRowAndScanWithRetryDefault(srDB, vu.config, minQuery, []interface{}{&nullable}); err != nil {
+		if err := retry.QueryRowAndScanWithRetry(srDB, retryConfig, minQuery, []interface{}{&nullable}); err != nil {
 			return fmt.Errorf("查询最小时间戳失败: %w", err)
 		}
 		if nullable == nil || *nullable == "" {
@@ -282,7 +292,7 @@ func (vu *ViewUpdater) UpdateSingleView(srDB, chDB *sql.DB, dbManager *database.
 		}
 	case "bigint":
 		var nullable *int64
-		if err := retry.QueryRowAndScanWithRetryDefault(srDB, vu.config, minQuery, []interface{}{&nullable}); err != nil {
+		if err := retry.QueryRowAndScanWithRetry(srDB, retryConfig, minQuery, []interface{}{&nullable}); err != nil {
 			return fmt.Errorf("查询最小时间戳失败: %w", err)
 		}
 		if nullable == nil {

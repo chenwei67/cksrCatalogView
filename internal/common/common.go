@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	p "example.com/migrationLab/parser"
+	p "example.com/migrationLib/parser"
 )
 
 // 角色常量，统一身份后缀

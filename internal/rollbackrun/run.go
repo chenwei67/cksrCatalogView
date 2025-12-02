@@ -14,7 +14,8 @@ import (
 	"cksr/lock"
 	"cksr/logger"
 
-	ckc "example.com/migrationLab/convert"
+	mlcommon "example.com/migrationLib/common"
+	ckc "example.com/migrationLib/convert"
 )
 
 // Run 统一入口：执行回滚逻辑（与 initrun 保持一致的接口风格）
@@ -146,14 +147,10 @@ func (rm *RollbackManager) findRollbackPlans() ([]TableRollbackPlan, error) {
 		return nil, fmt.Errorf("获取StarRocks表类型失败: %w", err)
 	}
 
-	// 预取 CK 表DDL与全库列映射
-	ckSchemaMap, err := rm.dbManager.ExportClickHouseTables()
+	// 预取 CK 全库列映射与表名
+	ckTablesMap, err := rm.dbManager.ExportClickHouseTablesAsParserTables()
 	if err != nil {
 		return nil, fmt.Errorf("导出ClickHouse表结构失败: %w", err)
-	}
-	ckColsMap, err := rm.dbManager.GetClickHouseTablesColumns()
-	if err != nil {
-		return nil, fmt.Errorf("获取ClickHouse全库列失败: %w", err)
 	}
 
 	// 忽略集合
@@ -163,7 +160,7 @@ func (rm *RollbackManager) findRollbackPlans() ([]TableRollbackPlan, error) {
 	}
 
 	var plans []TableRollbackPlan
-	for table := range ckSchemaMap {
+	for table := range ckTablesMap {
 		if ignore[table] {
 			logger.Info("忽略表: %s (在配置的忽略列表中)", table)
 			continue
@@ -178,11 +175,13 @@ func (rm *RollbackManager) findRollbackPlans() ([]TableRollbackPlan, error) {
 
 		// CK新增列清单
 		var ckAddedCols []string
-		if cols, ok := ckColsMap[table]; ok {
-			for _, c := range cols {
-				if ckc.IsAddedColumnByName(c) {
-					ckAddedCols = append(ckAddedCols, c)
-				}
+		converters, err := ckc.NewConverters(ckTablesMap[table], mlcommon.ScenarioView)
+		if err != nil {
+			return nil, fmt.Errorf("构建ClickHouse字段转换器失败: %w", err)
+		}
+		for _, c := range converters {
+			if c.IsAddedColumn() {
+				ckAddedCols = append(ckAddedCols, c.Field.Name)
 			}
 		}
 

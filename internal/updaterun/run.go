@@ -14,10 +14,11 @@ import (
 	"cksr/lock"
 	"cksr/logger"
 	"cksr/parser"
-	"cksr/retry"
 
-	ckc "example.com/migrationLab/convert"
-	p2 "example.com/migrationLab/parser"
+	mlcommon "example.com/migrationLib/common"
+	ckc "example.com/migrationLib/convert"
+	p2 "example.com/migrationLib/parser"
+	"example.com/migrationLib/retry"
 )
 
 // UpdateTarget 单次更新目标
@@ -106,21 +107,14 @@ func UpdateSingleView(cfg *config.Config, srDB, chDB *sql.DB, dbManager *databas
 
 	originalTableName := viewName
 
-	// 获取ClickHouse表结构
-	ckSchemaMap, err := dbManager.ExportClickHouseTables()
+	// 获取ClickHouse表结构（直接构造 parser.Table）
+	ckTablesMap, err := dbManager.ExportClickHouseTablesAsParserTables()
 	if err != nil {
 		return fmt.Errorf("导出ClickHouse表结构失败: %w", err)
 	}
-
-	ckDDL, exists := ckSchemaMap[originalTableName]
+	ckTable, exists := ckTablesMap[originalTableName]
 	if !exists {
-		return fmt.Errorf("未找到ClickHouse表 %s 的DDL", originalTableName)
-	}
-
-	// 解析ClickHouse表结构
-	ckTable, err := common.ParseTableFromString(ckDDL, pair.ClickHouse.Database, originalTableName, time.Duration(cfg.Parser.DDLParseTimeoutSeconds)*time.Second)
-	if err != nil {
-		return fmt.Errorf("解析ClickHouse表%s失败: %w", originalTableName, err)
+		return fmt.Errorf("未找到ClickHouse表 %s 的结构", originalTableName)
 	}
 
 	// 获取StarRocks表结构
@@ -136,7 +130,7 @@ func UpdateSingleView(cfg *config.Config, srDB, chDB *sql.DB, dbManager *databas
 	}
 
 	// 创建字段转换器
-	fieldConverters, err := ckc.NewConverters(ckTable)
+	fieldConverters, err := ckc.NewConverters(ckTable, mlcommon.ScenarioView)
 	if err != nil {
 		return fmt.Errorf("创建字段转换器失败: %w", err)
 	}
@@ -163,7 +157,11 @@ func UpdateSingleView(cfg *config.Config, srDB, chDB *sql.DB, dbManager *databas
 	}
 
 	// 执行ALTER VIEW语句（带重试）
-	if err := retry.ExecWithRetryDefault(srDB, cfg, alterViewSQL); err != nil {
+	retryConfig := retry.Config{
+		MaxRetries: cfg.Retry.MaxRetries,
+		Delay:      time.Duration(cfg.Retry.DelayMs) * time.Millisecond,
+	}
+	if err := retry.ExecWithRetry(srDB, retryConfig, alterViewSQL); err != nil {
 		return fmt.Errorf("执行ALTER VIEW语句失败: %w", err)
 	}
 

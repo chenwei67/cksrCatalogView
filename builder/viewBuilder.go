@@ -11,9 +11,9 @@ import (
 	"cksr/config"
 	"cksr/logger"
 	"cksr/parser"
-	"cksr/retry"
 
-	ckc "example.com/migrationLab/convert"
+	ckc "example.com/migrationLib/convert"
+	"example.com/migrationLib/retry"
 )
 
 // 视图SQL类型常量，避免使用魔字符串
@@ -77,8 +77,8 @@ type CKTableBuilder struct {
 // 构建sr的select
 type SRTableBuilder struct {
 	TableBuilder
-	fields  []SRField
-	nameMap map[string]SRField
+	fields  []SRField          // ck中存在对应的sr的字段
+	nameMap map[string]SRField // sr中所有字段，包括了在ck中完全没有对应的
 }
 
 func (st *SRTableBuilder) addClauseField(srField SRField) {
@@ -560,7 +560,11 @@ func (v *ViewBuilder) GenViewSQLWithType(ckQ, srQ string, sqlType string) (strin
 	switch strings.ToLower(timestampType) {
 	case "datetime", "date":
 		var nullableTimestamp *string
-		err = retry.QueryRowAndScanWithRetryDefault(db, v.config, minTimestampQuery, []interface{}{&nullableTimestamp})
+		retryConfig := retry.Config{
+			MaxRetries: v.config.Retry.MaxRetries,
+			Delay:      time.Duration(v.config.Retry.DelayMs) * time.Millisecond,
+		}
+		err = retry.QueryRowAndScanWithRetry(db, retryConfig, minTimestampQuery, []interface{}{&nullableTimestamp})
 		if err != nil {
 			if err == sql.ErrNoRows {
 				logger.Warn("表中没有数据，使用最大默认值")
@@ -586,7 +590,11 @@ func (v *ViewBuilder) GenViewSQLWithType(ckQ, srQ string, sqlType string) (strin
 		}
 	case "bigint":
 		var nullableTimestamp *int64
-		err = retry.QueryRowAndScanWithRetryDefault(db, v.config, minTimestampQuery, []interface{}{&nullableTimestamp})
+		retryConfig := retry.Config{
+			MaxRetries: v.config.Retry.MaxRetries,
+			Delay:      time.Duration(v.config.Retry.DelayMs) * time.Millisecond,
+		}
+		err = retry.QueryRowAndScanWithRetry(db, retryConfig, minTimestampQuery, []interface{}{&nullableTimestamp})
 		if err != nil {
 			if err == sql.ErrNoRows {
 				logger.Warn("表中没有数据，使用最大默认值")

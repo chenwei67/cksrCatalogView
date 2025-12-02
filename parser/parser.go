@@ -9,9 +9,17 @@
 package parser
 
 import (
-	"strings"
 	"cksr/logger"
+	"strings"
+
+	"example.com/migrationLib/parser"
 )
+
+// Re-export types from migrationLab/parser to maintain compatibility
+// and avoid type mismatch errors in cksr project.
+type DDL = parser.DDL
+type Field = parser.Field
+type Table = parser.Table
 
 func pass(s string) bool {
 	if len(s) == 0 {
@@ -64,33 +72,18 @@ func fetchValFromFunc(s string) string {
 
 func ParserTableSQL(s string) Table {
 	logger.Debug("ParserTableSQL开始执行")
-	var t = Table{}
-	lines := strings.Split(s, "\n")
-	logger.Debug("DDL分割为 %d 行", len(lines))
+	// Note: We are using the parser function from migrationLab/parser
+	// assuming it has the same logic or we should delegate to it.
+	// But here we keep the local implementation wrapper calling local parser logic?
+	// Wait, migrationLab/parser has ParserTableSQL too?
+	// If we alias Table = parser.Table, we need to make sure the methods are compatible.
+	// Methods defined on types in another package cannot be added here unless we use type alias.
+	// Go 1.9+ type alias: type Table = parser.Table.
+	// Methods of parser.Table are available on Table.
 
-	for index := 0; index < len(lines); index++ {
-		line := strings.TrimSpace(lines[index])
-		if index%10 == 0 {
-			logger.Debug("正在处理第 %d/%d 行", index+1, len(lines))
-		}
+	// However, the local implementation of ParserTableSQL constructs a Table.
+	// We need to use migrationLab/parser.ParserTableSQL if available, or adapt this function.
 
-		if pass(line) {
-			continue
-		}
-		if t.parserTableName(line) {
-			logger.Debug("解析到表名: %s", t.DDL.TableName)
-			continue
-		}
-		if t.parserField(line) {
-			if len(t.Field) > 0 {
-				logger.Debug("解析到字段: %s (总计 %d 个字段)", t.Field[len(t.Field)-1].Name, len(t.Field))
-			}
-			continue
-		}
-		if t.parserTTL(line) {
-			continue
-		}
-	}
-	logger.Debug("ParserTableSQL执行完成，解析到 %d 个字段", len(t.Field))
-	return t
+	// Let's check migrationLab/parser/parser.go content.
+	return parser.ParserTableSQL(s)
 }

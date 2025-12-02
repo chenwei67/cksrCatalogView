@@ -12,9 +12,10 @@ import (
 	"cksr/logger"
 	"cksr/parser"
 
-	ckb "example.com/migrationLab/builder"
-	ckc "example.com/migrationLab/convert"
-	p2 "example.com/migrationLab/parser"
+	mlcommon "example.com/migrationLib/common"
+	ckc "example.com/migrationLib/convert"
+	ckf "example.com/migrationLib/factory"
+	p2 "example.com/migrationLib/parser"
 )
 
 // TableInitPlan 单表初始化计划
@@ -63,9 +64,9 @@ func (im *InitManager) ExecuteInit() error {
 	if err := im.dbManager.Init(); err != nil {
 		return fmt.Errorf("初始化数据库连接失败: %w", err)
 	}
-	// 1) 导出 CK 表结构（重试由 database 层统一封装）
+	// 1) 导出 CK 表结构（基于列直接构造 parser.Table）
 	logger.Info("正在导出ClickHouse表结构...")
-	ckSchemaMap, err := im.dbManager.ExportClickHouseTables()
+	ckTablesMap, err := im.dbManager.ExportClickHouseTablesAsParserTables()
 	if err != nil {
 		return fmt.Errorf("导出ClickHouse表结构失败: %w", err)
 	}
@@ -83,7 +84,7 @@ func (im *InitManager) ExecuteInit() error {
 	}
 
 	// 4) 生成初始化计划（共同表 + 是否需要重命名），一次性预取SR类型映射，避免循环内查询
-	plans, err := im.findInitPlans(ckSchemaMap, srTableNames)
+	plans, err := im.findInitPlans(ckTablesMap, srTableNames)
 	if err != nil {
 		return err
 	}
@@ -91,7 +92,7 @@ func (im *InitManager) ExecuteInit() error {
 	logger.Info("找到%d个共同的表待处理", len(plans))
 	for idx, plan := range plans {
 		logger.Info("[%d/%d] 处理表: %s", idx+1, len(plans), plan.BaseTable)
-		if err := im.processTable(plan, ckSchemaMap); err != nil {
+		if err := im.processTable(plan, ckTablesMap); err != nil {
 			return err
 		}
 		logger.Info("表 %s 处理完成", plan.BaseTable)
@@ -102,7 +103,7 @@ func (im *InitManager) ExecuteInit() error {
 }
 
 // findInitPlans 确认共同表并生成初始化计划
-func (im *InitManager) findInitPlans(ckSchemaMap map[string]string, srTableNames []string) ([]TableInitPlan, error) {
+func (im *InitManager) findInitPlans(ckTablesMap map[string]p2.Table, srTableNames []string) ([]TableInitPlan, error) {
 	// 统一后缀检查：一次性校验，避免在循环中重复判断
 	suffix := strings.TrimSpace(im.pair.SRTableSuffix)
 	if suffix == "" {
@@ -125,7 +126,7 @@ func (im *InitManager) findInitPlans(ckSchemaMap map[string]string, srTableNames
 	}
 
 	var ckTables []string
-	for t := range ckSchemaMap {
+	for t := range ckTablesMap {
 		ckTables = append(ckTables, t)
 	}
 	logger.Debug("ClickHouse表名列表: %v", ckTables)
@@ -182,7 +183,7 @@ func (im *InitManager) findInitPlans(ckSchemaMap map[string]string, srTableNames
 }
 
 // processTable 处理单表：生成并执行 CK ALTER、SR 重命名、创建视图
-func (im *InitManager) processTable(plan TableInitPlan, ckSchemaMap map[string]string) error {
+func (im *InitManager) processTable(plan TableInitPlan, ckTablesMap map[string]p2.Table) error {
 	// 打印计划原因，便于审计
 	if plan.NeedRename {
 		logger.Info("计划：重命名并创建视图 - 表: %s，原因: %s；视图: %s", plan.BaseTable, plan.RenameReason, plan.ViewReason)
@@ -190,15 +191,14 @@ func (im *InitManager) processTable(plan TableInitPlan, ckSchemaMap map[string]s
 		logger.Info("计划：仅创建视图 - 表: %s，原因: %s", plan.BaseTable, plan.ViewReason)
 	}
 
-	// 解析 CK 表结构
-	logger.Debug("解析ClickHouse表结构: %s.%s", im.pair.ClickHouse.Database, plan.BaseTable)
-	ckTable, err := common.ParseTableFromString(ckSchemaMap[plan.BaseTable], im.pair.ClickHouse.Database, plan.BaseTable, time.Duration(im.cfg.Parser.DDLParseTimeoutSeconds)*time.Second)
-	if err != nil {
-		return fmt.Errorf("解析ClickHouse表 %s 失败: %w", plan.BaseTable, err)
+	// 获取 CK 表结构（已直接构造，无需解析DDL）
+	ckTable, ok := ckTablesMap[plan.BaseTable]
+	if !ok {
+		return fmt.Errorf("未获取到ClickHouse表结构: %s", plan.BaseTable)
 	}
 
 	// 生成并执行 CK ALTER 以新增别名列（必要时）
-	fieldConverters, err := ckc.NewConverters(ckTable)
+	fieldConverters, err := ckc.NewConverters(ckTable, mlcommon.ScenarioView)
 	if err != nil {
 		return fmt.Errorf("创建字段转换器失败(表 %s): %w", plan.BaseTable, err)
 	}
@@ -207,7 +207,7 @@ func (im *InitManager) processTable(plan TableInitPlan, ckSchemaMap map[string]s
 	// - 若需要重命名：基础名 -> 后缀名
 	// - 若无需重命名（仅创建视图，SR侧已存在后缀表）：使用后缀表名
 	if plan.NeedRename {
-		alterBuilder := ckb.NewCKAddColumnsBuilder(fieldConverters, ckTable.DDL.DBName, ckTable.DDL.TableName, ckb.NewViewModeStrategies())
+		alterBuilder := ckf.NewAddColumnsBuilder(mlcommon.ScenarioView, fieldConverters, ckTable.DDL.DBName, ckTable.DDL.TableName)
 		alterSQL := alterBuilder.Build()
 		if strings.TrimSpace(alterSQL) != "" {
 			ckDB, errConn := im.dbManager.GetClickHouseConnection()

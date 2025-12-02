@@ -1,13 +1,13 @@
 package main
 
 import (
-    "os"
+	"os"
 
-    "cksr/cmd"
+	"cksr/cmd"
 )
 
 func main() {
-    if err := cmd.NewRootCmd().Execute(); err != nil {
-        os.Exit(cmd.ResolveExitCode(err))
-    }
+	if err := cmd.NewRootCmd().Execute(); err != nil {
+		os.Exit(cmd.ResolveExitCode(err))
+	}
 }
