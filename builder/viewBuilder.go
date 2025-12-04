@@ -154,7 +154,7 @@ func (ct *CKTableBuilder) GenQuerySQL() string {
 		fieldsClause = append(fieldsClause, clause)
 	}
 	clauses := strings.Join(fieldsClause, "")
-	return fmt.Sprintf("select \n %sfrom %s.%s.%s", clauses, ct.catalogName, ct.DBName, ct.Name)
+	return fmt.Sprintf("select \n %sfrom `%s`.`%s`.`%s`", clauses, ct.catalogName, ct.DBName, ct.Name)
 }
 
 func (st *SRTableBuilder) GenQuerySQL() string {
@@ -169,7 +169,7 @@ func (st *SRTableBuilder) GenQuerySQL() string {
 		fieldsClause = append(fieldsClause, clause)
 	}
 	clauses := strings.Join(fieldsClause, "")
-	return fmt.Sprintf("select \n %s from %s.%s \n", clauses, st.DBName, st.Name)
+	return fmt.Sprintf("select \n %s from `%s`.`%s` \n", clauses, st.DBName, st.Name)
 }
 
 func NewBuilder(
@@ -558,7 +558,7 @@ func (v *ViewBuilder) GenViewSQLWithType(ckQ, srQ string, sqlType string) (strin
 		if perr != nil {
 			logger.Warn("分区路径获取最小时间戳失败，回退全表聚合: %v", perr)
 		}
-		q := fmt.Sprintf("select min(%s) from %s.%s", timestampColumn, v.sr.DBName, v.sr.Name)
+		q := fmt.Sprintf("select min(`%s`) from `%s`.`%s`", timestampColumn, v.sr.DBName, v.sr.Name)
 		switch strings.ToLower(timestampType) {
 		case "datetime", "date":
 			var nullableTimestamp *string
@@ -618,7 +618,7 @@ func (v *ViewBuilder) GenViewSQLWithType(ckQ, srQ string, sqlType string) (strin
 
 // ComposeFinalSQL 封装最终的 CREATE/ALTER 视图SQL拼接
 func (v *ViewBuilder) ComposeFinalSQL(sqlType, ckQ, srQ, timestampColumn, minTimestamp string) string {
-	body := fmt.Sprintf("%s.%s as \n%s \nwhere %s < %s \nunion all \n%s \nwhere %s >= %s; \n",
+	body := fmt.Sprintf("`%s`.`%s` as \n%s \nwhere `%s` < %s \nunion all \n%s \nwhere `%s` >= %s; \n",
 		v.dbName, v.viewName, ckQ, timestampColumn, minTimestamp, srQ, timestampColumn, minTimestamp)
 	if sqlType == SQLTypeAlter {
 		return "alter view " + body
@@ -653,7 +653,7 @@ func (v *ViewBuilder) tryMinTimestampViaPartitions(db *sql.DB, timestampColumn, 
 	}
 
 	for _, pn := range parts {
-		pq := fmt.Sprintf("SELECT MIN(%s) FROM %s.%s PARTITION (%s)", timestampColumn, v.sr.DBName, v.sr.Name, pn)
+		pq := fmt.Sprintf("SELECT MIN(`%s`) FROM `%s`.`%s` PARTITION (`%s`)", timestampColumn, v.sr.DBName, v.sr.Name, pn)
 		switch strings.ToLower(timestampType) {
 		case "datetime", "date":
 			var nullableTimestamp *string
