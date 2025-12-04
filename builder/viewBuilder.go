@@ -543,12 +543,6 @@ func (v *ViewBuilder) GenViewSQLWithType(ckQ, srQ string, sqlType string) (strin
 	// 获取时间戳列名和数据类型
 	timestampColumn := v.getTimestampColumnName(v.sr.Name)
 	timestampType := v.getTimestampColumnType(v.sr.Name)
-
-	// 先执行子查询获取固定的时间值
-	minTimestampQuery := fmt.Sprintf("select min(%s) from %s.%s", timestampColumn, v.sr.DBName, v.sr.Name)
-	logger.Debug("执行子查询获取最小时间戳: %s", minTimestampQuery)
-
-	// 查询最小时间戳，使用通用的重试wrapper
 	var minTimestamp string
 
 	db, err := v.dbManager.GetStarRocksConnection()
@@ -556,67 +550,64 @@ func (v *ViewBuilder) GenViewSQLWithType(ckQ, srQ string, sqlType string) (strin
 		return "", fmt.Errorf("获取StarRocks连接失败: %w", err)
 	}
 
-	// 根据数据类型选择不同的扫描方式
-	switch strings.ToLower(timestampType) {
-	case "datetime", "date":
-		var nullableTimestamp *string
-		retryConfig := retry.Config{
-			MaxRetries: v.config.Retry.MaxRetries,
-			Delay:      time.Duration(v.config.Retry.DelayMs) * time.Millisecond,
+	logger.Debug("尝试通过分区元数据获取最小时间戳")
+	if ts, perr := v.tryMinTimestampViaPartitions(db, timestampColumn, timestampType); perr == nil && strings.TrimSpace(ts) != "" {
+		minTimestamp = ts
+		logger.Debug("通过分区获取到最小时间戳: %s", minTimestamp)
+	} else {
+		if perr != nil {
+			logger.Warn("分区路径获取最小时间戳失败，回退全表聚合: %v", perr)
 		}
-		err = retry.QueryRowAndScanWithRetry(db, retryConfig, minTimestampQuery, []interface{}{&nullableTimestamp})
-		if err != nil {
-			if err == sql.ErrNoRows {
-				logger.Warn("表中没有数据，使用最大默认值")
+		q := fmt.Sprintf("select min(%s) from %s.%s", timestampColumn, v.sr.DBName, v.sr.Name)
+		switch strings.ToLower(timestampType) {
+		case "datetime", "date":
+			var nullableTimestamp *string
+			retryConfig := retry.Config{MaxRetries: v.config.Retry.MaxRetries, Delay: time.Duration(v.config.Retry.DelayMs) * time.Millisecond}
+			err = retry.QueryRowAndScanWithRetry(db, retryConfig, q, []interface{}{&nullableTimestamp})
+			if err != nil {
+				if err == sql.ErrNoRows {
+					minTimestamp, err = v.getDefaultTimestampValue(timestampType)
+					if err != nil {
+						return "", fmt.Errorf("获取默认时间戳值失败: %w", err)
+					}
+				} else {
+					return "", fmt.Errorf("查询最小时间戳失败: %w", err)
+				}
+			} else if nullableTimestamp == nil {
 				minTimestamp, err = v.getDefaultTimestampValue(timestampType)
 				if err != nil {
 					return "", fmt.Errorf("获取默认时间戳值失败: %w", err)
 				}
 			} else {
-				return "", fmt.Errorf("查询最小时间戳失败: %w", err)
+				minTimestamp, err = v.formatTimestampValue(*nullableTimestamp, timestampType)
+				if err != nil {
+					return "", fmt.Errorf("格式化时间戳值失败: %w", err)
+				}
 			}
-		} else if nullableTimestamp == nil {
-			logger.Warn("查询最小时间戳结果为NULL，使用最大默认值")
-			minTimestamp, err = v.getDefaultTimestampValue(timestampType)
+		case "bigint":
+			var nullableTimestamp *int64
+			retryConfig := retry.Config{MaxRetries: v.config.Retry.MaxRetries, Delay: time.Duration(v.config.Retry.DelayMs) * time.Millisecond}
+			err = retry.QueryRowAndScanWithRetry(db, retryConfig, q, []interface{}{&nullableTimestamp})
 			if err != nil {
-				return "", fmt.Errorf("获取默认时间戳值失败: %w", err)
-			}
-		} else {
-			minTimestamp, err = v.formatTimestampValue(*nullableTimestamp, timestampType)
-			if err != nil {
-				return "", fmt.Errorf("格式化时间戳值失败: %w", err)
-			}
-			logger.Debug("获取到最小时间戳: %s", minTimestamp)
-		}
-	case "bigint":
-		var nullableTimestamp *int64
-		retryConfig := retry.Config{
-			MaxRetries: v.config.Retry.MaxRetries,
-			Delay:      time.Duration(v.config.Retry.DelayMs) * time.Millisecond,
-		}
-		err = retry.QueryRowAndScanWithRetry(db, retryConfig, minTimestampQuery, []interface{}{&nullableTimestamp})
-		if err != nil {
-			if err == sql.ErrNoRows {
-				logger.Warn("表中没有数据，使用最大默认值")
+				if err == sql.ErrNoRows {
+					minTimestamp, err = v.getDefaultTimestampValue(timestampType)
+					if err != nil {
+						return "", fmt.Errorf("获取默认时间戳值失败: %w", err)
+					}
+				} else {
+					return "", fmt.Errorf("查询最小时间戳失败: %w", err)
+				}
+			} else if nullableTimestamp == nil {
 				minTimestamp, err = v.getDefaultTimestampValue(timestampType)
 				if err != nil {
 					return "", fmt.Errorf("获取默认时间戳值失败: %w", err)
 				}
 			} else {
-				return "", fmt.Errorf("查询最小时间戳失败: %w", err)
+				minTimestamp = fmt.Sprintf("%d", *nullableTimestamp)
 			}
-		} else if nullableTimestamp == nil {
-			logger.Warn("查询最小时间戳结果为NULL，使用最大默认值")
-			minTimestamp, err = v.getDefaultTimestampValue(timestampType)
-			if err != nil {
-				return "", fmt.Errorf("获取默认时间戳值失败: %w", err)
-			}
-		} else {
-			minTimestamp = fmt.Sprintf("%d", *nullableTimestamp)
-			logger.Debug("获取到最小时间戳: %s", minTimestamp)
+		default:
+			return "", fmt.Errorf("未知的时间戳数据类型: %s", timestampType)
 		}
-	default:
-		return "", fmt.Errorf("未知的时间戳数据类型: %s", timestampType)
 	}
 	// 统一封装最终SQL拼接
 	sql := v.ComposeFinalSQL(sqlType, ckQ, srQ, timestampColumn, minTimestamp)
@@ -633,6 +624,62 @@ func (v *ViewBuilder) ComposeFinalSQL(sqlType, ckQ, srQ, timestampColumn, minTim
 		return "alter view " + body
 	}
 	return "create view if not exists " + body
+}
+
+func (v *ViewBuilder) tryMinTimestampViaPartitions(db *sql.DB, timestampColumn, timestampType string) (string, error) {
+	retryConfig := retry.Config{MaxRetries: v.config.Retry.MaxRetries, Delay: time.Duration(v.config.Retry.DelayMs) * time.Millisecond}
+	q := "SELECT partition_name FROM information_schema.partitions WHERE table_schema = ? AND table_name = ? ORDER BY partition_name ASC"
+	rows, err := retry.QueryWithRetry(db, retryConfig, q, v.sr.DBName, v.sr.Name)
+	if err != nil {
+		return "", fmt.Errorf("查询分区列表失败: %w", err)
+	}
+	defer rows.Close()
+
+	parts := make([]string, 0, 16)
+	for rows.Next() {
+		var pn string
+		if err := rows.Scan(&pn); err != nil {
+			return "", fmt.Errorf("扫描分区名失败: %w", err)
+		}
+		if strings.TrimSpace(pn) != "" {
+			parts = append(parts, pn)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("遍历分区列表失败: %w", err)
+	}
+	if len(parts) == 0 {
+		return "", fmt.Errorf("未找到任何分区")
+	}
+
+	for _, pn := range parts {
+		pq := fmt.Sprintf("SELECT MIN(%s) FROM %s.%s PARTITION (%s)", timestampColumn, v.sr.DBName, v.sr.Name, pn)
+		switch strings.ToLower(timestampType) {
+		case "datetime", "date":
+			var nullableTimestamp *string
+			if err := retry.QueryRowAndScanWithRetry(db, retryConfig, pq, []interface{}{&nullableTimestamp}); err != nil {
+				continue
+			}
+			if nullableTimestamp != nil && strings.TrimSpace(*nullableTimestamp) != "" {
+				val, ferr := v.formatTimestampValue(*nullableTimestamp, timestampType)
+				if ferr != nil {
+					continue
+				}
+				return val, nil
+			}
+		case "bigint":
+			var nullableTimestamp *int64
+			if err := retry.QueryRowAndScanWithRetry(db, retryConfig, pq, []interface{}{&nullableTimestamp}); err != nil {
+				continue
+			}
+			if nullableTimestamp != nil {
+				return fmt.Sprintf("%d", *nullableTimestamp), nil
+			}
+		default:
+			return "", fmt.Errorf("未知的时间戳数据类型: %s", timestampType)
+		}
+	}
+	return "", fmt.Errorf("分区内未查询到最小时间戳")
 }
 
 // 构建clause
