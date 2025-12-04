@@ -4,10 +4,10 @@ import (
 	"errors"
 	"strings"
 
-	"cksr/database"
 	"cksr/internal/updaterun"
 	"cksr/logger"
 
+	mdb "example.com/migrationLib/database"
 	"github.com/spf13/cobra"
 )
 
@@ -23,13 +23,13 @@ func NewUpdateCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// 设置日志模式为 UPDATE
 			logger.SetLogMode(logger.ModeUpdate)
-			cfg, err := loadConfigAndInitLogging(cmd)
+			cfg, err := LoadConfigAndInitLogging(cmd)
 			if err != nil {
 				return err
 			}
 			defer logger.CloseLogFile()
 			// 统一在退出前关闭连接池
-			defer database.CloseAll()
+			defer mdb.CloseAll()
 
 			if strings.TrimSpace(pairName) == "" {
 				return WrapConfigErr(errors.New("必须提供 --pair"))

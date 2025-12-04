@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"cksr/config"
 	"cksr/logger"
-	"cksr/parser"
 
+	mcfg "example.com/migrationLib/config"
 	ckc "example.com/migrationLib/convert"
+	mp "example.com/migrationLib/parser"
 	"example.com/migrationLib/retry"
 )
 
@@ -33,7 +33,7 @@ type ViewBuilder struct {
 	viewName  string          // view的名称，就是ck中的name名称
 	dbName    string          // 数据库名称，应该就是sr中的db
 	dbManager DatabaseManager // 数据库管理器，用于执行查询
-	config    *config.Config  // 配置对象，用于获取时间戳列配置
+	config    *mcfg.Config    // 配置对象，用于获取时间戳列配置
 }
 
 type CKField struct {
@@ -53,7 +53,7 @@ func (c *CKField) SetSRField(field SRField) {
 }
 
 type SRField struct {
-	parser.Field
+	mp.Field
 	Clause string // select 语句中的子句
 }
 
@@ -110,7 +110,7 @@ func NewCKTableBuilder(fieldConverters []ckc.FieldConverter, tableName, dbName, 
 	}
 }
 
-func NewSRTableBuilder(fields []parser.Field, tableName, dbName string) SRTableBuilder {
+func NewSRTableBuilder(fields []mp.Field, tableName, dbName string) SRTableBuilder {
 	logger.Debug("创建SRTableBuilder，输入字段数量: %d", len(fields))
 
 	m := make(map[string]SRField)
@@ -174,10 +174,10 @@ func (st *SRTableBuilder) GenQuerySQL() string {
 
 func NewBuilder(
 	fieldConverters []ckc.FieldConverter,
-	srFields []parser.Field,
+	srFields []mp.Field,
 	ckDBName, ckTableName, ckCatalogName, srDBName, srTableName string,
 	dbManager DatabaseManager,
-	cfg *config.Config) ViewBuilder {
+	cfg *mcfg.Config) ViewBuilder {
 	ckTb := NewCKTableBuilder(fieldConverters, ckTableName, ckDBName, ckCatalogName)
 	srTb := NewSRTableBuilder(srFields, srTableName, srDBName)
 	return ViewBuilder{

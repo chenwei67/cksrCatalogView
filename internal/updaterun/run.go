@@ -8,16 +8,14 @@ import (
 	"time"
 
 	vbuilder "cksr/builder"
-	"cksr/config"
-	"cksr/database"
 	"cksr/internal/common"
 	"cksr/lock"
 	"cksr/logger"
-	"cksr/parser"
 
 	mlcommon "example.com/migrationLib/common"
+	mcfg "example.com/migrationLib/config"
 	ckc "example.com/migrationLib/convert"
-	p2 "example.com/migrationLib/parser"
+	mdb "example.com/migrationLib/database"
 	"example.com/migrationLib/retry"
 )
 
@@ -29,10 +27,10 @@ type UpdateTarget struct {
 }
 
 // RunOnceForTargets 一次性更新：按数据库对与视图名+分区值列表更新对应视图
-func RunOnceForTargets(cfg *config.Config, pairName string, targets []UpdateTarget) error {
+func RunOnceForTargets(cfg *mcfg.Config, pairName string, targets []UpdateTarget) error {
 	// 查找数据库对索引
 	var pairIndex int
-	var pair config.DatabasePair
+	var pair mcfg.DatabasePair
 	for i, p := range cfg.DatabasePairs {
 		if p.Name == pairName {
 			pairIndex = i
@@ -44,7 +42,7 @@ func RunOnceForTargets(cfg *config.Config, pairName string, targets []UpdateTarg
 		return fmt.Errorf("未找到数据库对: %s", pairName)
 	}
 
-	dbManager := database.NewDatabasePairManager(cfg, pairIndex)
+	dbManager := mdb.NewDatabasePairManager(cfg, pairIndex)
 	// 主动初始化连接池
 	if err := dbManager.Init(); err != nil {
 		return fmt.Errorf("初始化数据库连接失败: %w", err)
@@ -97,7 +95,7 @@ func RunOnceForTargets(cfg *config.Config, pairName string, targets []UpdateTarg
 }
 
 // UpdateSingleView 通用更新单个视图的逻辑，可选传入分区时间值
-func UpdateSingleView(cfg *config.Config, srDB, chDB *sql.DB, dbManager *database.DatabasePairManager, pair config.DatabasePair, viewName string, partitionValue string, hasPartition bool) error {
+func UpdateSingleView(cfg *mcfg.Config, srDB, chDB *sql.DB, dbManager *mdb.DatabasePairManager, pair mcfg.DatabasePair, viewName string, partitionValue string, hasPartition bool) error {
 	// 一次性更新必须显式提供分区值，不允许走自动推断逻辑
 	if !hasPartition {
 		return fmt.Errorf("一次性更新缺少分区时间值")
@@ -144,7 +142,7 @@ func UpdateSingleView(cfg *config.Config, srDB, chDB *sql.DB, dbManager *databas
 	// 创建ViewBuilder并生成ALTER VIEW SQL
 	viewBuilder := vbuilder.NewBuilder(
 		fieldConverters,
-		toSRFields(srTable.Field),
+		srTable.Field,
 		ckTable.DDL.DBName, ckTable.DDL.TableName, catalogName,
 		srTable.DDL.DBName, srTable.DDL.TableName,
 		dbManager,
@@ -169,12 +167,3 @@ func UpdateSingleView(cfg *config.Config, srDB, chDB *sql.DB, dbManager *databas
 	return nil
 }
 
-func toSRFields(fs []p2.Field) []parser.Field {
-	out := make([]parser.Field, 0, len(fs))
-	for _, f := range fs {
-		out = append(out, parser.Field{Name: f.Name, Type: f.Type, DefaultKind: f.DefaultKind, DefaultExpr: f.DefaultExpr})
-	}
-	return out
-}
-
-// 无需额外上下文封装，直接使用 context.Background()

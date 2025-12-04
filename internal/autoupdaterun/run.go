@@ -19,13 +19,13 @@ import (
 	"syscall"
 	"time"
 
-	"cksr/config"
-	"cksr/database"
 	"cksr/internal/common"
 	"cksr/internal/updaterun"
 	"cksr/lock"
 	"cksr/logger"
 
+	mcfg "example.com/migrationLib/config"
+	mdb "example.com/migrationLib/database"
 	"example.com/migrationLib/retry"
 	"github.com/robfig/cron/v3"
 )
@@ -40,8 +40,7 @@ type ViewUpdaterConfig struct {
 
 // ViewUpdater 视图更新器
 type ViewUpdater struct {
-	config      *config.Config
-	updaterCfg  *ViewUpdaterConfig
+	config      *mcfg.Config
 	lockManager lock.LockManager
 	cron        *cron.Cron
 	ctx         context.Context
@@ -51,10 +50,7 @@ type ViewUpdater struct {
 }
 
 // NewViewUpdater 创建视图更新器
-func NewViewUpdater(cfg *config.Config, updaterCfg *ViewUpdaterConfig) (*ViewUpdater, error) {
-	if !updaterCfg.Enabled {
-		return nil, fmt.Errorf("视图更新器未启用")
-	}
+func NewViewUpdater(cfg *mcfg.Config) (*ViewUpdater, error) {
 
 	// 创建锁管理器
 	lockManager, err := lock.CreateLockManager(
@@ -72,7 +68,6 @@ func NewViewUpdater(cfg *config.Config, updaterCfg *ViewUpdaterConfig) (*ViewUpd
 
 	return &ViewUpdater{
 		config:      cfg,
-		updaterCfg:  updaterCfg,
 		lockManager: lockManager,
 		cron:        cron.New(cron.WithSeconds()),
 		ctx:         ctx,
@@ -89,10 +84,10 @@ func (vu *ViewUpdater) Start() error {
 		return fmt.Errorf("视图更新器已在运行")
 	}
 
-	logger.Info("启动视图更新器，Cron表达式: %s", vu.updaterCfg.CronExpression)
+	logger.Info("启动视图更新器，Cron表达式: %s", vu.config.ViewUpdater.CronExpression)
 
 	// 添加定时任务，cron框架会自动在协程中执行
-	_, err := vu.cron.AddFunc(vu.updaterCfg.CronExpression, func() {
+	_, err := vu.cron.AddFunc(vu.config.ViewUpdater.CronExpression, func() {
 		if err := vu.updateAllViews(); err != nil {
 			logger.Error("更新视图失败: %v", err)
 		}
@@ -153,7 +148,7 @@ func (vu *ViewUpdater) updateAllViews() error {
 	for i, pair := range vu.config.DatabasePairs {
 		logger.Info("开始更新数据库对 %s 的视图", pair.Name)
 
-		dbManager := database.NewDatabasePairManager(vu.config, i)
+		dbManager := mdb.NewDatabasePairManager(vu.config, i)
 		if err := vu.updateViewsForPair(dbManager, pair); err != nil {
 			logger.Error("更新数据库对 %s 的视图失败: %v", pair.Name, err)
 			return err
@@ -167,7 +162,7 @@ func (vu *ViewUpdater) updateAllViews() error {
 }
 
 // updateViewsForPair 更新单个数据库对的视图
-func (vu *ViewUpdater) updateViewsForPair(dbManager *database.DatabasePairManager, pair config.DatabasePair) error {
+func (vu *ViewUpdater) updateViewsForPair(dbManager *mdb.DatabasePairManager, pair mcfg.DatabasePair) error {
 	// 主动初始化连接池，未初始化不允许继续
 	if err := dbManager.Init(); err != nil {
 		return fmt.Errorf("初始化数据库连接失败: %w", err)
@@ -235,7 +230,7 @@ func (vu *ViewUpdater) getAllViews(srDB *sql.DB, database string) ([]string, err
 }
 
 // UpdateSingleView 更新单个视图的时间边界
-func (vu *ViewUpdater) UpdateSingleView(srDB, chDB *sql.DB, dbManager *database.DatabasePairManager, pair config.DatabasePair, viewName string) error {
+func (vu *ViewUpdater) UpdateSingleView(srDB, chDB *sql.DB, dbManager *mdb.DatabasePairManager, pair mcfg.DatabasePair, viewName string) error {
 	// 自动更新：自行计算时间边界，然后委托一次性更新库执行
 	srTableName := vu.getStarRocksTableNameFromView(viewName, pair)
 
@@ -309,18 +304,13 @@ func (vu *ViewUpdater) UpdateSingleView(srDB, chDB *sql.DB, dbManager *database.
 }
 
 // getStarRocksTableNameFromView 根据视图名和配置后缀生成StarRocks表名
-func (vu *ViewUpdater) getStarRocksTableNameFromView(viewName string, pair config.DatabasePair) string {
+func (vu *ViewUpdater) getStarRocksTableNameFromView(viewName string, pair mcfg.DatabasePair) string {
 	return viewName + pair.SRTableSuffix
 }
 
 // Run 统一入口：启动视图更新器并阻塞等待退出信号
-func Run(cfg *config.Config) error {
-	updaterConfig := &ViewUpdaterConfig{
-		Enabled:        true,
-		CronExpression: cfg.ViewUpdater.CronExpression,
-	}
-
-	viewUpdater, err := NewViewUpdater(cfg, updaterConfig)
+func Run(cfg *mcfg.Config) error {
+	viewUpdater, err := NewViewUpdater(cfg)
 	if err != nil {
 		logger.Error("创建视图更新器失败: %v", err)
 		return err

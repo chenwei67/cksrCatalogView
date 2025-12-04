@@ -1,9 +1,10 @@
 package cmd
 
 import (
-	"cksr/database"
 	"cksr/internal/rollbackrun"
 	"cksr/logger"
+
+	mdb "example.com/migrationLib/database"
 	"github.com/spf13/cobra"
 )
 
@@ -15,13 +16,13 @@ func NewRollbackCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// 设置日志模式为 ROLLBACK
 			logger.SetLogMode(logger.ModeRollback)
-			cfg, err := loadConfigAndInitLogging(cmd)
+			cfg, err := LoadConfigAndInitLogging(cmd)
 			if err != nil {
 				return err
 			}
 			defer logger.CloseLogFile()
 			// 统一在退出前关闭连接池
-			defer database.CloseAll()
+			defer mdb.CloseAll()
 
 			logger.Info("开始执行回退操作...")
 			if err := rollbackrun.Run(cfg); err != nil {

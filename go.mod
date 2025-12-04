@@ -4,17 +4,15 @@ go 1.25.1
 
 require (
 	example.com/migrationLib v0.0.0
-	github.com/ClickHouse/clickhouse-go v1.5.4
-	github.com/go-sql-driver/mysql v1.7.1
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.8.0
 	k8s.io/api v0.34.1
 	k8s.io/apimachinery v0.34.1
-	example.com/migrationLib v0.0.0
 	k8s.io/client-go v0.34.1
 )
 
 require (
+	github.com/ClickHouse/clickhouse-go v1.5.4 // indirect
 	github.com/cloudflare/golz4 v0.0.0-20150217214814-ef862a3cdc58 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/emicklei/go-restful/v3 v3.12.2 // indirect
@@ -23,6 +21,7 @@ require (
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect
 	github.com/go-openapi/jsonreference v0.20.2 // indirect
 	github.com/go-openapi/swag v0.23.0 // indirect
+	github.com/go-sql-driver/mysql v1.7.1 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
@@ -57,3 +56,5 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.0 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
+
+replace example.com/migrationLib => ../migrationLib

@@ -3,12 +3,14 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 
-	"cksr/config"
 	"cksr/logger"
 
 	"github.com/spf13/cobra"
+
+	mcfg "example.com/migrationLib/config"
 )
 
 // ---- CLI 统一：退出码与日志等级 ----
@@ -48,49 +50,39 @@ func ResolveExitCode(err error) int {
 // 要求：
 // - 当提供的日志级别非法时，必须返回错误，不允许静默降级
 // - 若非法来源为配置文件，返回的错误会包装为配置错误，参与统一退出码解析
-func ApplyEffectiveLogLevel(cmd *cobra.Command, cfg *config.Config) error {
-	// 命令行参数（仅在用户显式设置时生效）；读取错误不可忽略
-	flagLevel, flagErr := cmd.Root().PersistentFlags().GetString("log-level")
-	if flagErr != nil {
-		return WrapConfigErr(fmt.Errorf("读取 --log-level 参数失败: %w", flagErr))
-	}
-	flagChanged := cmd.Root().PersistentFlags().Changed("log-level")
-
-	// 配置文件
-	cfgLevel := strings.TrimSpace(cfg.Log.LogLevel)
-
-	var levelStr string
-	var source string
-	var fromConfig bool
-	switch {
-	case cfgLevel != "":
-		// 配置文件优先于命令行参数
-		levelStr = cfgLevel
-		source = "config.log.log_level"
-		fromConfig = true
-	case flagChanged:
-		// 用户显式设置了参数，即使为空也要进行合法性校验，不允许静默忽略
-		levelStr = flagLevel
-		source = "flag --log-level"
-		fromConfig = false
-	default:
-		levelStr = "INFO"
-		source = "default"
-		fromConfig = false
-	}
-
-	// 严格校验日志级别合法性（不允许忽略）
+func applyEffectiveLogLevel(flagLevel string) error {
+	levelStr := flagLevel
 	normalized := strings.ToUpper(strings.TrimSpace(levelStr))
 	switch normalized {
 	case "SILENT", "ERROR", "WARN", "WARNING", "INFO", "DEBUG":
 		logger.SetLogLevel(logger.ParseLogLevel(normalized))
-		logger.Info("日志级别设置为: %s (来源: %s)", logger.LogLevelString(logger.GetCurrentLevel()), source)
+		logger.Info("日志级别设置为: %s (来源: %s)", logger.LogLevelString(logger.GetCurrentLevel()), "cmd.log_level")
 		return nil
 	default:
-		err := fmt.Errorf("非法日志级别: %q (来源: %s)，允许值: SILENT, ERROR, WARN, INFO, DEBUG", levelStr, source)
-		if fromConfig {
-			return WrapConfigErr(err)
-		}
-		return err
+		return fmt.Errorf("非法日志级别: %q (来源: %s)，允许值: SILENT, ERROR, WARN, INFO, DEBUG", levelStr, "cmd.log_level")
 	}
+}
+func LoadConfigAndInitLogging(cmd *cobra.Command) (*mcfg.Config, error) {
+	flagLevel, flagErr := cmd.Root().PersistentFlags().GetString("log-level")
+	if flagErr != nil {
+		return nil, flagErr
+	}
+	inlineJSON, jsonErr := cmd.Root().PersistentFlags().GetString("config-json")
+	if jsonErr != nil {
+		return nil, jsonErr
+	}
+	return LoadInlineConfigAndInitLog(flagLevel, inlineJSON)
+}
+
+func LoadInlineConfigAndInitLog(flagLevel string, inlineJSON string) (*mcfg.Config, error) {
+	cfg, err := mcfg.ParseConfigBytes([]byte(inlineJSON))
+	if err != nil {
+		return nil, WrapConfigErr(err)
+	}
+	if err := applyEffectiveLogLevel(flagLevel); err != nil {
+		return nil, WrapConfigErr(err)
+	}
+	// 忽略配置中的文件日志设置，统一使用标准输出
+	log.Printf("配置加载完成，数据库对数量: %d", len(cfg.DatabasePairs))
+	return cfg, nil
 }

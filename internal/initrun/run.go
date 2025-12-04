@@ -6,14 +6,13 @@ import (
 	"time"
 
 	"cksr/builder"
-	"cksr/config"
-	"cksr/database"
 	"cksr/internal/common"
 	"cksr/logger"
-	"cksr/parser"
 
 	mlcommon "example.com/migrationLib/common"
+	mcfg "example.com/migrationLib/config"
 	ckc "example.com/migrationLib/convert"
+	mdb "example.com/migrationLib/database"
 	ckf "example.com/migrationLib/factory"
 	p2 "example.com/migrationLib/parser"
 )
@@ -29,16 +28,16 @@ type TableInitPlan struct {
 
 // InitManager 初始化管理器，负责单个数据库对的完整流程
 type InitManager struct {
-	dbManager   *database.DatabasePairManager
-	cfg         *config.Config
-	pair        config.DatabasePair
+	dbManager   *mdb.DatabasePairManager
+	cfg         *mcfg.Config
+	pair        mcfg.DatabasePair
 	catalogName string
 }
 
 // NewInitManager 创建初始化管理器
-func NewInitManager(cfg *config.Config, pairIndex int) *InitManager {
+func NewInitManager(cfg *mcfg.Config, pairIndex int) *InitManager {
 	return &InitManager{
-		dbManager:   database.NewDatabasePairManager(cfg, pairIndex),
+		dbManager:   mdb.NewDatabasePairManager(cfg, pairIndex),
 		cfg:         cfg,
 		pair:        cfg.DatabasePairs[pairIndex],
 		catalogName: cfg.DatabasePairs[pairIndex].CatalogName,
@@ -46,7 +45,7 @@ func NewInitManager(cfg *config.Config, pairIndex int) *InitManager {
 }
 
 // Run 处理多个数据库对（创建/同步视图）
-func Run(cfg *config.Config) error {
+func Run(cfg *mcfg.Config) error {
 	for i, pair := range cfg.DatabasePairs {
 		logger.Info("开始处理数据库对 %s (索引: %d)", pair.Name, i)
 		if err := NewInitManager(cfg, i).ExecuteInit(); err != nil {
@@ -143,7 +142,7 @@ func (im *InitManager) findInitPlans(ckTablesMap map[string]p2.Table, srTableNam
 		if srMap[ckTable] {
 			// 区分是否已是视图（使用预取的类型映射）
 			t := strings.ToUpper(srTypes[ckTable])
-			if t == database.StarRocksTableTypeView {
+			if t == mdb.StarRocksTableTypeView {
 				// 已创建视图，初始化无需处理
 				logger.Debug("基础名 %s 在SR中为视图，跳过", ckTable)
 				continue
@@ -164,7 +163,7 @@ func (im *InitManager) findInitPlans(ckTablesMap map[string]p2.Table, srTableNam
 		if srMap[renamed] {
 			// 基础名不存在或不是视图，则需要仅创建视图（已重命名）
 			t := strings.ToUpper(srTypes[ckTable])
-			if t != database.StarRocksTableTypeView {
+			if t != mdb.StarRocksTableTypeView {
 				// 已完成重命名，但基础名视图尚未创建，计划仅创建视图
 				logger.Info("发现已重命名但未创建视图的表: %s -> %s，加入处理队列", ckTable, renamed)
 				plans = append(plans, TableInitPlan{
@@ -238,7 +237,7 @@ func (im *InitManager) processTable(plan TableInitPlan, ckTablesMap map[string]p
 	// 生成并执行视图 SQL
 	viewBuilder := builder.NewBuilder(
 		fieldConverters,
-		toSRFields(srTable.Field),
+		srTable.Field,
 		ckTable.DDL.DBName, ckTable.DDL.TableName, im.catalogName,
 		srTable.DDL.DBName, srTable.DDL.TableName,
 		im.dbManager,
@@ -258,12 +257,4 @@ func (im *InitManager) processTable(plan TableInitPlan, ckTablesMap map[string]p
 		}
 	}
 	return nil
-}
-
-func toSRFields(fs []p2.Field) []parser.Field {
-	out := make([]parser.Field, 0, len(fs))
-	for _, f := range fs {
-		out = append(out, parser.Field{Name: f.Name, Type: f.Type, DefaultKind: f.DefaultKind, DefaultExpr: f.DefaultExpr})
-	}
-	return out
 }

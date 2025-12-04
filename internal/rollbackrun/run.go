@@ -8,26 +8,26 @@ import (
 	"time"
 
 	"cksr/builder"
-	"cksr/config"
-	"cksr/database"
 	"cksr/internal/common"
 	"cksr/lock"
 	"cksr/logger"
 
 	mlcommon "example.com/migrationLib/common"
+	mcfg "example.com/migrationLib/config"
 	ckc "example.com/migrationLib/convert"
+	mdb "example.com/migrationLib/database"
 )
 
 // Run 统一入口：执行回滚逻辑（与 initrun 保持一致的接口风格）
-func Run(cfg *config.Config) error {
+func Run(cfg *mcfg.Config) error {
 	return ExecuteRollbackForAllPairs(cfg)
 }
 
 // RollbackManager 回退管理器
 type RollbackManager struct {
-	dbManager *database.DatabasePairManager
-	cfg       *config.Config
-	pair      config.DatabasePair
+	dbManager *mdb.DatabasePairManager
+	cfg       *mcfg.Config
+	pair      mcfg.DatabasePair
 	stats     RollbackStats
 }
 
@@ -77,9 +77,9 @@ func (e *FailureRecord) Error() string {
 }
 
 // NewRollbackManager 创建回退管理器
-func NewRollbackManager(cfg *config.Config, pairIndex int) *RollbackManager {
+func NewRollbackManager(cfg *mcfg.Config, pairIndex int) *RollbackManager {
 	return &RollbackManager{
-		dbManager: database.NewDatabasePairManager(cfg, pairIndex),
+		dbManager: mdb.NewDatabasePairManager(cfg, pairIndex),
 		cfg:       cfg,
 		pair:      cfg.DatabasePairs[pairIndex],
 	}
@@ -170,7 +170,7 @@ func (rm *RollbackManager) findRollbackPlans() ([]TableRollbackPlan, error) {
 		_, srSuffixedExists := srTableSet[suffixed]
 		_, srBaseExists := srTableSet[table]
 		srBaseType := srTypes[table]
-		srBaseIsView := strings.ToUpper(srBaseType) == database.StarRocksTableTypeView
+		srBaseIsView := strings.ToUpper(srBaseType) == mdb.StarRocksTableTypeView
 		suffixedType := srTypes[suffixed]
 
 		// CK新增列清单
@@ -203,14 +203,14 @@ func (rm *RollbackManager) findRollbackPlans() ([]TableRollbackPlan, error) {
 			BaseTable:      table,
 			SuffixedTable:  suffixed,
 			NeedDropView:   srBaseExists && srBaseIsView,
-			NeedRename:     srSuffixedExists && strings.ToUpper(suffixedType) == database.StarRocksTableTypeBaseTable,
+			NeedRename:     srSuffixedExists && strings.ToUpper(suffixedType) == mdb.StarRocksTableTypeBaseTable,
 			CanRename:      (!srBaseExists) || srBaseIsView,
 			CKAddedColumns: ckAddedCols,
 		}
 
 		// 决策原因填充
 		if plan.NeedDropView {
-			plan.DropViewReason = fmt.Sprintf("基础表存在且为%s(避免与重命名目标 %s 冲突)", database.StarRocksTableTypeView, table)
+			plan.DropViewReason = fmt.Sprintf("基础表存在且为%s(避免与重命名目标 %s 冲突)", mdb.StarRocksTableTypeView, table)
 		} else if srBaseExists && !srBaseIsView {
 			plan.DropViewReason = fmt.Sprintf("基础表存在且为非视图(类型=%s)，无需删除视图", srBaseType)
 		} else if !srBaseExists {
@@ -218,7 +218,7 @@ func (rm *RollbackManager) findRollbackPlans() ([]TableRollbackPlan, error) {
 		}
 
 		if plan.NeedRename {
-			plan.RenameReason = fmt.Sprintf("后缀表存在且类型为%s，需要去后缀重命名", database.StarRocksTableTypeBaseTable)
+			plan.RenameReason = fmt.Sprintf("后缀表存在且类型为%s，需要去后缀重命名", mdb.StarRocksTableTypeBaseTable)
 		} else if srSuffixedExists {
 			plan.RenameReason = fmt.Sprintf("后缀表存在但类型为%s，不需要重命名", strings.ToUpper(suffixedType))
 		} else {
@@ -313,7 +313,7 @@ func (rm *RollbackManager) printPairSummary() {
 }
 
 // ExecuteRollbackForAllPairs 对所有数据库对执行回退操作
-func ExecuteRollbackForAllPairs(cfg *config.Config) error {
+func ExecuteRollbackForAllPairs(cfg *mcfg.Config) error {
 	lockManager, err := lock.CreateLockManager(
 		cfg.Lock.DebugMode,
 		cfg.Lock.K8sNamespace,
