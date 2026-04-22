@@ -41,22 +41,9 @@ func (b *SRPairViewBuilder) Build() (string, error) {
 		return "", err
 	}
 
-	var oldSelectClauses []string
-	var newSelectClauses []string
-	for _, newField := range b.newTable.Field {
-		newSelectClauses = append(newSelectClauses, fmt.Sprintf("    `%s`", newField.Name))
-
-		oldField, exists := b.oldFields[newField.Name]
-		if exists {
-			oldSelectClauses = append(oldSelectClauses, fmt.Sprintf("    `%s`", oldField.Name))
-			continue
-		}
-
-		clause, err := buildOldTableCompatibleClause(newField)
-		if err != nil {
-			return "", err
-		}
-		oldSelectClauses = append(oldSelectClauses, "    "+clause)
+	oldSelectClauses, newSelectClauses, err := b.buildSelectClauses()
+	if err != nil {
+		return "", err
 	}
 
 	return fmt.Sprintf(
@@ -70,6 +57,58 @@ func (b *SRPairViewBuilder) Build() (string, error) {
 		b.dbName,
 		b.newTable.DDL.TableName,
 	), nil
+}
+
+func (b *SRPairViewBuilder) BuildWithTimeBoundary(timestampColumn, minTimestamp string) (string, error) {
+	if err := b.validate(); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(timestampColumn) == "" {
+		return "", fmt.Errorf("时间列名为空")
+	}
+	if strings.TrimSpace(minTimestamp) == "" {
+		return "", fmt.Errorf("最小时间值为空")
+	}
+
+	oldSelectClauses, newSelectClauses, err := b.buildSelectClauses()
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf(
+		"CREATE VIEW `%s`.`%s` AS\nSELECT\n%s\nFROM `%s`.`%s`\nWHERE `%s` < %s\nUNION ALL\nSELECT\n%s\nFROM `%s`.`%s`;\n",
+		b.dbName,
+		b.viewName,
+		strings.Join(oldSelectClauses, ",\n"),
+		b.dbName,
+		b.oldTable.DDL.TableName,
+		timestampColumn,
+		minTimestamp,
+		strings.Join(newSelectClauses, ",\n"),
+		b.dbName,
+		b.newTable.DDL.TableName,
+	), nil
+}
+
+func (b *SRPairViewBuilder) buildSelectClauses() ([]string, []string, error) {
+	var oldSelectClauses []string
+	var newSelectClauses []string
+	for _, newField := range b.newTable.Field {
+		newSelectClauses = append(newSelectClauses, fmt.Sprintf("    `%s`", newField.Name))
+
+		oldField, exists := b.oldFields[newField.Name]
+		if exists {
+			oldSelectClauses = append(oldSelectClauses, fmt.Sprintf("    `%s`", oldField.Name))
+			continue
+		}
+
+		clause, err := buildOldTableCompatibleClause(newField)
+		if err != nil {
+			return nil, nil, err
+		}
+		oldSelectClauses = append(oldSelectClauses, "    "+clause)
+	}
+	return oldSelectClauses, newSelectClauses, nil
 }
 
 func (b *SRPairViewBuilder) validate() error {
@@ -96,8 +135,8 @@ func (b *SRPairViewBuilder) validate() error {
 		}
 	}
 
-	if len(b.newTable.Field) <= len(b.oldTable.Field) {
-		return fmt.Errorf("新表 %s 的列数(%d)未多于旧表 %s 的列数(%d)", b.newTable.DDL.TableName, len(b.newTable.Field), b.oldTable.DDL.TableName, len(b.oldTable.Field))
+	if len(b.newTable.Field) < len(b.oldTable.Field) {
+		return fmt.Errorf("新表 %s 的列数(%d)少于旧表 %s 的列数(%d)", b.newTable.DDL.TableName, len(b.newTable.Field), b.oldTable.DDL.TableName, len(b.oldTable.Field))
 	}
 	return nil
 }

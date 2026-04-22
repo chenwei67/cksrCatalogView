@@ -44,6 +44,66 @@ func TestSRPairViewBuilderBuild(t *testing.T) {
 	}
 }
 
+func TestSRPairViewBuilderBuildWithTimeBoundary(t *testing.T) {
+	oldTable := parser.Table{
+		DDL: parser.DDL{TableName: "asset_old"},
+		Field: []parser.Field{
+			{Name: "id", Type: "bigint"},
+			{Name: "recordTimestamp", Type: "bigint"},
+		},
+	}
+	newTable := parser.Table{
+		DDL: parser.DDL{TableName: "asset_new"},
+		Field: []parser.Field{
+			{Name: "id", Type: "bigint"},
+			{Name: "recordTimestamp", Type: "bigint"},
+			{Name: "tenant", Type: "varchar(20)", DefaultKind: "DEFAULT", DefaultExpr: "'default_tenant'"},
+		},
+	}
+
+	sql, err := NewSRPairViewBuilder("business", "asset", oldTable, newTable).BuildWithTimeBoundary("recordTimestamp", "1735689600")
+	if err != nil {
+		t.Fatalf("BuildWithTimeBoundary returned error: %v", err)
+	}
+
+	wants := []string{
+		"WHERE `recordTimestamp` < 1735689600",
+	}
+	for _, want := range wants {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("expected SQL to contain %q, got:\n%s", want, sql)
+		}
+	}
+	if strings.Contains(sql, "WHERE `recordTimestamp` >=") {
+		t.Fatalf("expected new table query to have no timestamp filter, got:\n%s", sql)
+	}
+}
+
+func TestSRPairViewBuilderBuildAllowsSameColumns(t *testing.T) {
+	oldTable := parser.Table{
+		DDL: parser.DDL{TableName: "asset_old"},
+		Field: []parser.Field{
+			{Name: "id", Type: "bigint"},
+			{Name: "recordTimestamp", Type: "bigint"},
+		},
+	}
+	newTable := parser.Table{
+		DDL: parser.DDL{TableName: "asset_new"},
+		Field: []parser.Field{
+			{Name: "id", Type: "bigint"},
+			{Name: "recordTimestamp", Type: "bigint"},
+		},
+	}
+
+	sql, err := NewSRPairViewBuilder("business", "asset", oldTable, newTable).Build()
+	if err != nil {
+		t.Fatalf("expected same-column tables to be allowed, got error: %v", err)
+	}
+	if !strings.Contains(sql, "FROM `business`.`asset_old`") || !strings.Contains(sql, "FROM `business`.`asset_new`") {
+		t.Fatalf("unexpected sql for same-column tables:\n%s", sql)
+	}
+}
+
 func TestSRPairViewBuilderBuildFailsWhenNewOnlyColumnCannotBeFilled(t *testing.T) {
 	oldTable := parser.Table{
 		DDL: parser.DDL{TableName: "asset_old"},

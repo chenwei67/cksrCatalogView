@@ -116,10 +116,11 @@ CKSR 用于在 StarRocks 中构建与维护统一视图，将本地冷热数据�
 - 基于 SR 同库新旧表创建视图
   - `cksr create-sr-view --config ./config.json --pair cold --old-suffix _old --new-suffix _new`
   - 自动把 `*_new` 与 `*_old` 配对，创建基础名视图。
+  - 会先按分区顺序探测新表时间列的最小非空值，并仅对旧表追加 `时间列 < 最小值` 条件；新表查询不追加时间过滤。
   - `cksr create-sr-view gen --config ./config.json --pair cold --old-suffix _old --new-suffix _new --output-dir ./temp/create-sr-view-sql`
   - `gen` 子命令只生成 SQL 文件，不直接执行；默认输出到 `<temp_dir>/create-sr-view-sql`，每个视图一个 `.sql` 文件。
   - 约束：
-    - 新表必须比旧表多列，且旧表列必须是新表列子集。
+    - 新表允许与旧表列完全相同，但旧表列必须是新表列子集。
     - 新增列必须是生成列（`AS ...`）或带默认值（`DEFAULT ...`），否则命令直接报错退出。
 
 - 常驻自动更新器
