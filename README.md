@@ -13,6 +13,9 @@ CKSR 用于在 StarRocks 中构建与维护统一视图，将本地冷热数据�
 - 一次性更新：
   - 通过 `cksr update` 为视图重建时间分界（例如 `timestamp >= 'YYYY-MM-DD HH:MM:SS'` 或 `>= <epoch_sec>`）。
   - 支持一次传入多组 `--table` 与 `--partition` 成对参数批量更新。
+- SR 同库新旧表建视图：
+  - 通过 `cksr create-sr-view` 自动匹配同库内“旧后缀表”和“新后缀表”，创建基础名视图。
+  - 视图列顺序与新表保持一致；旧表缺失的新列会按生成列公式或默认值补齐。
 - 常驻自动更新：
   - 通过 `cksr auto-update` 按配置的 Cron 表达式定期更新视图分界。
   - 使用互斥锁（调试/lease 两种模式）避免与一次性更新并发冲突。
@@ -32,6 +35,9 @@ CKSR 用于在 StarRocks 中构建与维护统一视图，将本地冷热数据�
   4) 基于 SR 后缀表与 CK 表（通过 Catalog）构建并执行 `CREATE VIEW base`。
 - 一次性更新（`cksr update`）
   - 对指定视图生成并执行 `ALTER VIEW`，使用传入的分区值作为下界过滤（`timestamp >= 分界`）。
+- SR 同库新旧表建视图（`cksr create-sr-view`）
+  - 扫描 StarRocks 同一库中带不同后缀的新旧表，例如 `asset_old` 与 `asset_new`。
+  - 自动创建基础名视图 `asset`，定义为 `old UNION ALL new`，并按新表列定义补齐旧表缺失列。
 - 常驻更新（`cksr auto-update`）
   - 按 Cron 定期更新指定视图集的分界；运行期间持有互斥锁避免冲突。
 - 回滚（`cksr rollback`）
@@ -107,6 +113,15 @@ CKSR 用于在 StarRocks 中构建与维护统一视图，将本地冷热数据�
     - `date`：必须带引号（例如 `'YYYY-MM-DD'`）。
     - `bigint`（epoch 秒）：不加引号，传数值（例如 `1731369600`）。
 
+- 基于 SR 同库新旧表创建视图
+  - `cksr create-sr-view --config ./config.json --pair cold --old-suffix _old --new-suffix _new`
+  - 自动把 `*_new` 与 `*_old` 配对，创建基础名视图。
+  - `cksr create-sr-view gen --config ./config.json --pair cold --old-suffix _old --new-suffix _new --output-dir ./temp/create-sr-view-sql`
+  - `gen` 子命令只生成 SQL 文件，不直接执行；默认输出到 `<temp_dir>/create-sr-view-sql`，每个视图一个 `.sql` 文件。
+  - 约束：
+    - 新表必须比旧表多列，且旧表列必须是新表列子集。
+    - 新增列必须是生成列（`AS ...`）或带默认值（`DEFAULT ...`），否则命令直接报错退出。
+
 - 常驻自动更新器
   - `cksr auto-update --config ./config.json`
   - 按 `view_updater.cron_expression` 周期性更新；与一次性更新互斥。
@@ -145,6 +160,7 @@ CKSR 用于在 StarRocks 中构建与维护统一视图，将本地冷热数据�
 
 ## 目录结构速览
 - `cmd/`：CLI 命令入口（`init`/`update`/`auto-update`/`rollback`）。
+- `internal/createsrviewrun/`：SR 同库新旧表建视图执行逻辑。
 - `internal/`：核心执行逻辑（初始化/更新/回滚）。
 - `builder/`：视图与字段映射构建器。
 - `parser/`：DDL 解析。

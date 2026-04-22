@@ -9,8 +9,8 @@
 package parser
 
 import (
-    "strings"
-    "cksr/logger"
+	"cksr/logger"
+	"strings"
 )
 
 func (t *Table) parserTableName(s string) bool {
@@ -134,42 +134,47 @@ func fetchWord(ss string, begin int) (string, int) {
 }
 
 func (t *Table) parserField(s string) bool {
-    indexStr := "`"
-    if !strings.HasPrefix(s, indexStr) {
-        return false
-    }
-    var fd = Field{}
-    var index int
-    fd.Name, index = fetchWord(s, index)
-    fd.Type, index = fetchWord(s, index)
-    fd.Name = strings.ReplaceAll(fd.Name, "`", "")
+	indexStr := "`"
+	if !strings.HasPrefix(s, indexStr) {
+		return false
+	}
+	var fd = Field{}
+	var index int
+	fd.Name, index = fetchWord(s, index)
+	fd.Type, index = fetchWord(s, index)
+	fd.Name = strings.ReplaceAll(fd.Name, "`", "")
 
-    // 仅解析 DEFAULT 默认值（CK/SR）
-    for {
-        tok, next := fetchWord(s, index)
-        tokTrim := strings.TrimSpace(tok)
-        if tokTrim == "" {
-            break
-        }
-        upper := strings.ToUpper(tokTrim)
+	// 仅解析 DEFAULT 默认值（CK/SR）
+	for {
+		tok, next := fetchWord(s, index)
+		tokTrim := strings.TrimSpace(tok)
+		if tokTrim == "" {
+			break
+		}
+		upper := strings.ToUpper(tokTrim)
 
-        switch upper {
-        case "DEFAULT":
-            val, next2 := fetchWord(s, next)
-            fd.DefaultKind = "DEFAULT"
-            fd.DefaultExpr = strings.TrimSpace(val)
-            index = next2
-            continue
-        }
+		switch upper {
+		case "DEFAULT":
+			val, next2 := fetchWord(s, next)
+			fd.DefaultKind = "DEFAULT"
+			fd.DefaultExpr = strings.TrimSpace(val)
+			index = next2
+			continue
+		case "AS":
+			val, next2 := fetchWord(s, next)
+			fd.DefaultKind = "AS"
+			fd.DefaultExpr = strings.TrimSpace(val)
+			index = next2
+			continue
+		}
 
-        // 推进index到下一个位置
-        index = next
-    }
+		// 推进index到下一个位置
+		index = next
+	}
 
-    t.Field = append(t.Field, fd)
-    return true
+	t.Field = append(t.Field, fd)
+	return true
 }
-
 
 func (t *Table) parserTTL(s string) bool {
 	indexStr := "ttl "
