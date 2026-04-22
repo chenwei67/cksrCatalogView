@@ -29,9 +29,13 @@ type GeneratedViewSQL struct {
 	SQL      string
 }
 
+type buildOptions struct {
+	skipExistingViewCheck bool
+}
+
 // Run 基于同库内新旧后缀表批量创建基础名视图。
 func Run(cfg *config.Config, pairName, oldSuffix, newSuffix string) error {
-	generatedViews, buildErr := BuildViewSQLs(cfg, pairName, oldSuffix, newSuffix)
+	generatedViews, buildErr := BuildViewSQLs(cfg, pairName, oldSuffix, newSuffix, buildOptions{})
 	if buildErr != nil {
 		return buildErr
 	}
@@ -62,7 +66,7 @@ func Run(cfg *config.Config, pairName, oldSuffix, newSuffix string) error {
 
 // RunGen 生成创建视图 SQL 文件而不直接执行。
 func RunGen(cfg *config.Config, pairName, oldSuffix, newSuffix, outputDir string) error {
-	generatedViews, err := BuildViewSQLs(cfg, pairName, oldSuffix, newSuffix)
+	generatedViews, err := BuildViewSQLs(cfg, pairName, oldSuffix, newSuffix, buildOptions{skipExistingViewCheck: true})
 	if err != nil {
 		return err
 	}
@@ -77,7 +81,7 @@ func RunGen(cfg *config.Config, pairName, oldSuffix, newSuffix, outputDir string
 }
 
 // BuildViewSQLs 构建所有待创建视图的 SQL，但不执行。
-func BuildViewSQLs(cfg *config.Config, pairName, oldSuffix, newSuffix string) ([]GeneratedViewSQL, error) {
+func BuildViewSQLs(cfg *config.Config, pairName, oldSuffix, newSuffix string, options buildOptions) ([]GeneratedViewSQL, error) {
 	oldSuffix = strings.TrimSpace(oldSuffix)
 	newSuffix = strings.TrimSpace(newSuffix)
 	if oldSuffix == "" || newSuffix == "" {
@@ -106,7 +110,7 @@ func BuildViewSQLs(cfg *config.Config, pairName, oldSuffix, newSuffix string) ([
 		return nil, fmt.Errorf("获取StarRocks表类型失败: %w", err)
 	}
 
-	pairs, err := findTablePairs(srTableNames, srTypes, oldSuffix, newSuffix)
+	pairs, err := findTablePairs(srTableNames, srTypes, oldSuffix, newSuffix, options)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +169,7 @@ func findDatabasePair(cfg *config.Config, pairName string) (int, config.Database
 	return 0, config.DatabasePair{}, fmt.Errorf("未找到数据库对: %s", pairName)
 }
 
-func findTablePairs(tableNames []string, tableTypes map[string]string, oldSuffix, newSuffix string) ([]TablePair, error) {
+func findTablePairs(tableNames []string, tableTypes map[string]string, oldSuffix, newSuffix string, options buildOptions) ([]TablePair, error) {
 	nameSet := make(map[string]bool, len(tableNames))
 	for _, tableName := range tableNames {
 		nameSet[tableName] = true
@@ -190,7 +194,7 @@ func findTablePairs(tableNames []string, tableTypes map[string]string, oldSuffix
 		if !strings.EqualFold(strings.TrimSpace(tableTypes[oldTable]), database.StarRocksTableTypeBaseTable) {
 			return nil, fmt.Errorf("旧表 %s 不是普通表，实际类型=%s", oldTable, tableTypes[oldTable])
 		}
-		if nameSet[baseName] {
+		if !options.skipExistingViewCheck && nameSet[baseName] {
 			return nil, fmt.Errorf("视图目标名 %s 已存在对象，无法创建视图", baseName)
 		}
 

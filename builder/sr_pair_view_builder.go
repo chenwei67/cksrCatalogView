@@ -147,7 +147,9 @@ func buildOldTableCompatibleClause(newField parser.Field) (string, error) {
 		return fmt.Sprintf("CAST(%s AS %s) AS `%s`", newField.DefaultExpr, newField.Type, newField.Name), nil
 	case strings.EqualFold(strings.TrimSpace(newField.DefaultKind), "DEFAULT") && strings.TrimSpace(newField.DefaultExpr) != "":
 		return fmt.Sprintf("CAST(%s AS %s) AS `%s`", newField.DefaultExpr, newField.Type, newField.Name), nil
+	case newField.IsNullable:
+		return fmt.Sprintf("CAST(NULL AS %s) AS `%s`", newField.Type, newField.Name), nil
 	default:
-		return "", fmt.Errorf("新列 %s 无法在旧表侧补齐: 既不是生成列也没有默认值", newField.Name)
+		return "", fmt.Errorf("新列 %s 无法在旧表侧补齐: 既不是生成列，也没有默认值，且不允许为NULL", newField.Name)
 	}
 }

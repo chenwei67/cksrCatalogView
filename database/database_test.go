@@ -11,23 +11,27 @@ func TestBuildStarRocksTableSchema(t *testing.T) {
 			ColumnName:      "tenant",
 			OrdinalPosition: 4,
 			ColumnType:      "varchar(20)",
+			IsNullable:      "NO",
 			ColumnDefault:   sql.NullString{String: "'default_tenant'", Valid: true},
 		},
 		{
 			ColumnName:           "event_day",
 			OrdinalPosition:      3,
 			ColumnType:           "date",
+			IsNullable:           "NO",
 			GenerationExpression: sql.NullString{String: "date_trunc('day', event_time)", Valid: true},
 		},
 		{
 			ColumnName:      "id",
 			OrdinalPosition: 1,
 			ColumnType:      "bigint",
+			IsNullable:      "NO",
 		},
 		{
 			ColumnName:      "event_time",
 			OrdinalPosition: 2,
 			ColumnType:      "datetime",
+			IsNullable:      "YES",
 		},
 	})
 	if err != nil {
@@ -52,5 +56,46 @@ func TestBuildStarRocksTableSchemaRejectsEmptyColumns(t *testing.T) {
 	_, err := buildStarRocksTableSchema("business", "asset_new", nil)
 	if err == nil {
 		t.Fatal("expected error for empty columns")
+	}
+}
+
+func TestBuildStarRocksTableSchemaHandlesEmptyStringDefault(t *testing.T) {
+	table, err := buildStarRocksTableSchema("business", "asset_new", []StarRocksColumnSchema{
+		{
+			ColumnName:      "manage",
+			OrdinalPosition: 1,
+			ColumnType:      "varchar(65533)",
+			IsNullable:      "YES",
+			ColumnDefault:   sql.NullString{String: "\"\"", Valid: true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildStarRocksTableSchema returned error: %v", err)
+	}
+	if len(table.Field) != 1 {
+		t.Fatalf("expected 1 field, got %d", len(table.Field))
+	}
+	if table.Field[0].DefaultKind != "DEFAULT" || table.Field[0].DefaultExpr != "''" {
+		t.Fatalf("unexpected empty string default mapping: %+v", table.Field[0])
+	}
+}
+
+func TestBuildStarRocksTableSchemaHandlesNullableColumn(t *testing.T) {
+	table, err := buildStarRocksTableSchema("business", "asset_new", []StarRocksColumnSchema{
+		{
+			ColumnName:      "remark",
+			OrdinalPosition: 1,
+			ColumnType:      "varchar(64)",
+			IsNullable:      "YES",
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildStarRocksTableSchema returned error: %v", err)
+	}
+	if !table.Field[0].IsNullable {
+		t.Fatalf("expected field to be nullable: %+v", table.Field[0])
+	}
+	if table.Field[0].DefaultKind != "" || table.Field[0].DefaultExpr != "" {
+		t.Fatalf("nullable field without default should not synthesize default metadata: %+v", table.Field[0])
 	}
 }

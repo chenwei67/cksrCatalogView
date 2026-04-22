@@ -127,3 +127,27 @@ func TestSRPairViewBuilderBuildFailsWhenNewOnlyColumnCannotBeFilled(t *testing.T
 		t.Fatalf("expected error to mention tenant, got %v", err)
 	}
 }
+
+func TestSRPairViewBuilderBuildUsesNullForNullableNewColumn(t *testing.T) {
+	oldTable := parser.Table{
+		DDL: parser.DDL{TableName: "asset_old"},
+		Field: []parser.Field{
+			{Name: "id", Type: "bigint"},
+		},
+	}
+	newTable := parser.Table{
+		DDL: parser.DDL{TableName: "asset_new"},
+		Field: []parser.Field{
+			{Name: "id", Type: "bigint"},
+			{Name: "remark", Type: "varchar(64)", IsNullable: true},
+		},
+	}
+
+	sql, err := NewSRPairViewBuilder("business", "asset", oldTable, newTable).Build()
+	if err != nil {
+		t.Fatalf("expected nullable new column to be filled by NULL, got error: %v", err)
+	}
+	if !strings.Contains(sql, "CAST(NULL AS varchar(64)) AS `remark`") {
+		t.Fatalf("expected SQL to contain NULL fill clause, got:\n%s", sql)
+	}
+}

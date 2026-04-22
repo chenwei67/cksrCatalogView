@@ -12,6 +12,7 @@ import (
 	"database/sql"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -330,6 +331,7 @@ type StarRocksColumnSchema struct {
 	ColumnName           string
 	OrdinalPosition      int
 	ColumnType           string
+	IsNullable           string
 	ColumnDefault        sql.NullString
 	GenerationExpression sql.NullString
 }
@@ -343,7 +345,7 @@ func (dm *DatabasePairManager) GetStarRocksTableSchema(tableName string) (parser
 
 	pair := dm.config.DatabasePairs[dm.pairIndex]
 	query := `
-		SELECT column_name, ordinal_position, column_type, column_default, generation_expression
+		SELECT column_name, ordinal_position, column_type, is_nullable, column_default, generation_expression
 		FROM information_schema.columns
 		WHERE table_schema = ? AND table_name = ?
 		ORDER BY ordinal_position
@@ -362,6 +364,7 @@ func (dm *DatabasePairManager) GetStarRocksTableSchema(tableName string) (parser
 			&column.ColumnName,
 			&column.OrdinalPosition,
 			&column.ColumnType,
+			&column.IsNullable,
 			&column.ColumnDefault,
 			&column.GenerationExpression,
 		); err != nil {
@@ -394,17 +397,18 @@ func buildStarRocksTableSchema(dbName, tableName string, columns []StarRocksColu
 
 	for _, column := range columns {
 		field := parser.Field{
-			Name: strings.TrimSpace(column.ColumnName),
-			Type: strings.TrimSpace(column.ColumnType),
+			Name:       strings.TrimSpace(column.ColumnName),
+			Type:       strings.TrimSpace(column.ColumnType),
+			IsNullable: strings.EqualFold(strings.TrimSpace(column.IsNullable), "YES"),
 		}
 
 		generationExpr := strings.TrimSpace(column.GenerationExpression.String)
-		defaultExpr := strings.TrimSpace(column.ColumnDefault.String)
+		defaultExpr := normalizeStarRocksDefaultExpr(column.ColumnDefault.String, column.ColumnType)
 		switch {
 		case column.GenerationExpression.Valid && generationExpr != "":
 			field.DefaultKind = "AS"
 			field.DefaultExpr = generationExpr
-		case column.ColumnDefault.Valid && defaultExpr != "":
+		case column.ColumnDefault.Valid:
 			field.DefaultKind = "DEFAULT"
 			field.DefaultExpr = defaultExpr
 		}
@@ -412,6 +416,26 @@ func buildStarRocksTableSchema(dbName, tableName string, columns []StarRocksColu
 		table.Field = append(table.Field, field)
 	}
 	return table, nil
+}
+
+func normalizeStarRocksDefaultExpr(raw, columnType string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" && isStringLikeColumnType(columnType) {
+		return "''"
+	}
+	if len(trimmed) >= 2 && strings.HasPrefix(trimmed, "\"") && strings.HasSuffix(trimmed, "\"") {
+		if unquoted, err := strconv.Unquote(trimmed); err == nil {
+			return "'" + strings.ReplaceAll(unquoted, "'", "''") + "'"
+		}
+	}
+	return trimmed
+}
+
+func isStringLikeColumnType(columnType string) bool {
+	lowerType := strings.ToLower(strings.TrimSpace(columnType))
+	return strings.HasPrefix(lowerType, "varchar") ||
+		strings.HasPrefix(lowerType, "char") ||
+		strings.HasPrefix(lowerType, "string")
 }
 
 // ExecuteClickHouseSQL 执行ClickHouse SQL

@@ -74,3 +74,24 @@ func TestTimestampFormatHelpers(t *testing.T) {
 		t.Fatalf("unexpected bigint default result: got=%s err=%v", got, err)
 	}
 }
+
+func TestFindTablePairsSkipsExistingViewCheckForGen(t *testing.T) {
+	tableNames := []string{"asset_old", "asset_new", "asset"}
+	tableTypes := map[string]string{
+		"asset_old": "BASE TABLE",
+		"asset_new": "BASE TABLE",
+		"asset":     "VIEW",
+	}
+
+	if _, err := findTablePairs(tableNames, tableTypes, "_old", "_new", buildOptions{}); err == nil {
+		t.Fatal("expected normal mode to fail when target view already exists")
+	}
+
+	pairs, err := findTablePairs(tableNames, tableTypes, "_old", "_new", buildOptions{skipExistingViewCheck: true})
+	if err != nil {
+		t.Fatalf("expected gen mode to skip existing view check, got error: %v", err)
+	}
+	if len(pairs) != 1 || pairs[0].BaseName != "asset" {
+		t.Fatalf("unexpected pairs result: %+v", pairs)
+	}
+}

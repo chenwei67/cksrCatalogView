@@ -15,16 +15,15 @@ type DDL struct {
 }
 
 type Field struct {
-    Name           string
-    Type           string
-    // 仅保留默认值相关
-    DefaultKind    string // CK: DEFAULT/MATERIALIZED/EPHEMERAL/ALIAS；SR: DEFAULT/AS
-    DefaultExpr    string // 默认值或生成表达式（原文）
+	Name       string
+	Type       string
+	IsNullable bool
+	// 仅保留默认值相关
+	DefaultKind string // CK: DEFAULT/MATERIALIZED/EPHEMERAL/ALIAS；SR: DEFAULT/AS
+	DefaultExpr string // 默认值或生成表达式（原文）
 }
 
-
-
 type Table struct {
-	DDL              DDL
-	Field            []Field
+	DDL   DDL
+	Field []Field
 }

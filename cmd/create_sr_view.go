@@ -45,10 +45,10 @@ func NewCreateSRViewCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&pairName, "pair", "", "数据库对名称")
-	cmd.Flags().StringVar(&oldSuffix, "old-suffix", "", "旧表后缀")
-	cmd.Flags().StringVar(&newSuffix, "new-suffix", "", "新表后缀")
-	cmd.AddCommand(&cobra.Command{
+	cmd.PersistentFlags().StringVar(&pairName, "pair", "", "数据库对名称")
+	cmd.PersistentFlags().StringVar(&oldSuffix, "old-suffix", "", "旧表后缀")
+	cmd.PersistentFlags().StringVar(&newSuffix, "new-suffix", "", "新表后缀")
+	genCmd := &cobra.Command{
 		Use:   "gen",
 		Short: "生成建视图 SQL 文件而不直接执行",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -76,8 +76,9 @@ func NewCreateSRViewCmd() *cobra.Command {
 			}
 			return createsrviewrun.RunGen(cfg, pairName, oldSuffix, newSuffix, targetOutputDir)
 		},
-	})
-	cmd.PersistentFlags().StringVar(&outputDir, "output-dir", "", "gen 子命令输出目录，默认 <temp_dir>/create-sr-view-sql")
+	}
+	genCmd.Flags().StringVar(&outputDir, "output-dir", "", "gen 子命令输出目录，默认 <temp_dir>/create-sr-view-sql")
+	cmd.AddCommand(genCmd)
 
 	return cmd
 }
